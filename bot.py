@@ -5,7 +5,7 @@ from discord import app_commands
 import asyncio
 import json
 
-# === БЕЗОПАСНО ЗАРЕЖДАНЕ НА ENV VARIABLES И INTENTS ===
+# === Environment Variables и проверки ===
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID_ENV = os.getenv("DISCORD_CHANNEL_ID")
 
@@ -21,42 +21,28 @@ except ValueError:
 
 print(f"✅ Env variables заредени успешно. Канал ID: {CHANNEL_ID}")
 
-# РОЛИ, които имат достъп до админ команди
-ALLOWED_ROLES = ["Admin", "Moderator"]
-
-# Intents
+# === Intents ===
 intents = discord.Intents.default()
 intents.presences = True
 intents.members = True
-intents.message_content = True
+intents.message_content = True  # нужно за командите и четене на съобщения
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-active_messages = {}  # ID → {данни, task, status, message_ref}
+# === Конфигурация и променливи ===
 SAVE_FILE = "active_messages.json"
-
-
-# РОЛИ, които имат достъп до админ команди
 ALLOWED_ROLES = ["Admin", "Moderator"]
-
-intents = discord.Intents.default()
-bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree
-
 active_messages = {}  # ID → {данни, task, status, message_ref}
-
 
 # === Помощни функции ===
 def has_permission(user: discord.Member) -> bool:
-    """Проверява дали потребителят има една от разрешените роли."""
     if user.guild_permissions.administrator:
         return True
     for role in user.roles:
         if role.name in ALLOWED_ROLES:
             return True
     return False
-
 
 def save_messages():
     data = {}
@@ -73,9 +59,7 @@ def save_messages():
     with open(SAVE_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-
 async def restart_message_task(msg_id, msg_data):
-    """Стартира цикъла, ако е активно."""
     if msg_data.get("status") != "active":
         return
 
@@ -99,9 +83,7 @@ async def restart_message_task(msg_id, msg_data):
     task = asyncio.create_task(task_func())
     active_messages[msg_id]["task"] = task
 
-
 async def load_messages():
-    """Зарежда от JSON и рестартира активните."""
     if not os.path.exists(SAVE_FILE):
         return
     with open(SAVE_FILE, "r", encoding="utf-8") as f:
@@ -111,9 +93,7 @@ async def load_messages():
         active_messages[msg_id]["task"] = None
         await restart_message_task(msg_id, msg)
 
-
 async def update_embed_status(msg_id):
-    """Обновява embed цвета и статуса в реално време."""
     msg_data = active_messages.get(msg_id)
     if not msg_data or not msg_data.get("embed_message_id"):
         return
@@ -130,7 +110,6 @@ async def update_embed_status(msg_id):
         color=discord.Color.green() if msg_data['status']=="active" else discord.Color.red()
     )
     await embed_msg.edit(embed=embed, view=MessageButtons(msg_id))
-
 
 # === View с бутони ===
 class MessageButtons(discord.ui.View):
@@ -198,7 +177,6 @@ class MessageButtons(discord.ui.View):
         else:
             await interaction.response.send_message("❌ Не е намерено.", ephemeral=True)
 
-
 # === Команди ===
 @bot.event
 async def on_ready():
@@ -206,7 +184,6 @@ async def on_ready():
     await tree.sync()
     await load_messages()
     print("🔁 Възстановени активни съобщения.")
-
 
 @tree.command(name="create", description="Създай автоматично съобщение.")
 @app_commands.describe(
@@ -263,7 +240,6 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
     save_messages()
     await interaction.response.send_message(f"✅ Създадено съобщение '{id}'.", ephemeral=True)
 
-
 @tree.command(name="list", description="Покажи всички съобщения с бутони.")
 async def list_messages(interaction: discord.Interaction):
     if not has_permission(interaction.user):
@@ -286,7 +262,6 @@ async def list_messages(interaction: discord.Interaction):
     save_messages()
     await interaction.response.send_message("📋 Всички съобщения са показани по-долу.", ephemeral=True)
 
-
 @tree.command(name="help_create", description="Показва пример за /create")
 async def help_create(interaction: discord.Interaction):
     if not has_permission(interaction.user):
@@ -305,5 +280,5 @@ async def help_create(interaction: discord.Interaction):
     )
     await interaction.response.send_message(example, ephemeral=True)
 
-
+# === Стартиране на бота ===
 bot.run(TOKEN)
