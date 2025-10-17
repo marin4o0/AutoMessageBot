@@ -1,13 +1,13 @@
+import os
 import discord
 from discord.ext import commands
 from discord import app_commands
 import asyncio
 import json
-import os
 
-# === КОНФИГУРАЦИЯ ===
-TOKEN = "YOUR_BOT_TOKEN"
-CHANNEL_ID = 123456789012345678  # <-- фиксиран канал ID
+# === КОНФИГУРАЦИЯ (чрез process.env / Railway variables) ===
+TOKEN = os.getenv("DISCORD_TOKEN")
+CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
 SAVE_FILE = "active_messages.json"
 
 # РОЛИ, които имат достъп до админ команди
