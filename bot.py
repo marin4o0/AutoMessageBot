@@ -8,7 +8,7 @@ import json
 # === Environment Variables и проверки ===
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID_ENV = os.getenv("DISCORD_CHANNEL_ID")
-GUILD_ID_ENV = os.getenv("GUILD_ID")  # ново
+GUILD_ID_ENV = os.getenv("GUILD_ID")  # твоя сървър
 
 if not TOKEN:
     raise ValueError("❌ DISCORD_TOKEN не е зададено в environment variables")
@@ -28,8 +28,6 @@ except ValueError:
     raise ValueError(f"❌ GUILD_ID трябва да е число, а е '{GUILD_ID_ENV}'")
 
 guild = discord.Object(id=GUILD_ID)
-
-print(f"✅ Env variables заредени успешно. Канал ID: {CHANNEL_ID}, Guild ID: {GUILD_ID}")
 
 # === Intents ===
 intents = discord.Intents.default()
@@ -132,7 +130,6 @@ class MessageButtons(discord.ui.View):
         if not has_permission(interaction.user):
             await interaction.response.send_message("🚫 Нямаш права за тази операция.", ephemeral=True)
             return
-
         msg = active_messages.get(self.msg_id)
         if not msg:
             await interaction.response.send_message("❌ Не е намерено.", ephemeral=True)
@@ -151,7 +148,6 @@ class MessageButtons(discord.ui.View):
         if not has_permission(interaction.user):
             await interaction.response.send_message("🚫 Нямаш права за тази операция.", ephemeral=True)
             return
-
         msg = active_messages.get(self.msg_id)
         if not msg:
             await interaction.response.send_message("❌ Не е намерено.", ephemeral=True)
@@ -170,7 +166,6 @@ class MessageButtons(discord.ui.View):
         if not has_permission(interaction.user):
             await interaction.response.send_message("🚫 Нямаш права за тази операция.", ephemeral=True)
             return
-
         msg = active_messages.pop(self.msg_id, None)
         if msg:
             task = msg.get("task")
@@ -191,6 +186,100 @@ class MessageButtons(discord.ui.View):
 @bot.event
 async def on_ready():
     print(f"✅ Влязъл съм като {bot.user}")
-    await tree.sync(guild=guild)  # локален sync за твоя сървър
+    await tree.sync(guild=guild)  # локален sync за твоят сървър
     await load_messages()
     print("🔁 Възстановени активни съобщения.")
+
+@tree.command(name="create", description="Създай автоматично съобщение.")
+@app_commands.describe(
+    message="Текст на съобщението",
+    interval="Интервал в минути (>0)",
+    repeat="Брой повторения (0 = безкрайно)",
+    id="Уникален идентификатор"
+)
+async def create(interaction: discord.Interaction, message: str, interval: int, repeat: int, id: str):
+    if not has_permission(interaction.user):
+        await interaction.response.send_message("🚫 Нямаш права да създаваш съобщения.", ephemeral=True)
+        return
+    if id in active_messages:
+        await interaction.response.send_message(f"⚠️ '{id}' вече съществува.", ephemeral=True)
+        return
+    if interval <= 0:
+        await interaction.response.send_message("❌ Интервалът трябва да е > 0.", ephemeral=True)
+        return
+
+    channel = bot.get_channel(CHANNEL_ID)
+    async def task_func():
+        count = 0
+        while True:
+            if repeat != 0 and count >= repeat:
+                break
+            await channel.send(message)
+            count += 1
+            await asyncio.sleep(interval * 60)
+        active_messages[id]["status"] = "stopped"
+        await update_embed_status(id)
+        save_messages()
+
+    task = asyncio.create_task(task_func())
+    msg_data = {
+        "task": task,
+        "message": message,
+        "interval": interval,
+        "repeat": repeat,
+        "id": id,
+        "creator": interaction.user.name,
+        "status": "active"
+    }
+    active_messages[id] = msg_data
+    save_messages()
+
+    embed = discord.Embed(
+        title=f"🆔 {id} (active)",
+        description=f"💬 {message}\n⏱️ Интервал: {interval} мин\n🔁 Повторения: {'∞' if repeat==0 else repeat}\n👤 От: {interaction.user.name}",
+        color=discord.Color.green()
+    )
+    sent = await channel.send(embed=embed, view=MessageButtons(id))
+    msg_data["embed_message_id"] = sent.id
+    save_messages()
+    await interaction.response.send_message(f"✅ Създадено съобщение '{id}'.", ephemeral=True)
+
+@tree.command(name="list", description="Покажи всички съобщения с бутони.")
+async def list_messages(interaction: discord.Interaction):
+    if not has_permission(interaction.user):
+        await interaction.response.send_message("🚫 Нямаш права за тази команда.", ephemeral=True)
+        return
+    if not active_messages:
+        await interaction.response.send_message("ℹ️ Няма съобщения.", ephemeral=True)
+        return
+    for msg in active_messages.values():
+        color = discord.Color.green() if msg["status"] == "active" else discord.Color.red()
+        embed = discord.Embed(
+            title=f"🆔 {msg['id']} ({msg['status']})",
+            description=f"💬 {msg['message']}\n⏱️ Интервал: {msg['interval']} мин\n🔁 Повторения: {'∞' if msg['repeat']==0 else msg['repeat']}\n👤 От: {msg['creator']}",
+            color=color
+        )
+        sent = await interaction.channel.send(embed=embed, view=MessageButtons(msg["id"]))
+        msg["embed_message_id"] = sent.id
+    save_messages()
+    await interaction.response.send_message("📋 Всички съобщения са показани по-долу.", ephemeral=True)
+
+@tree.command(name="help_create", description="Показва пример за /create")
+async def help_create(interaction: discord.Interaction):
+    if not has_permission(interaction.user):
+        await interaction.response.send_message("🚫 Нямаш права за тази команда.", ephemeral=True)
+        return
+    example = (
+        "🧠 **Пример:**\n"
+        "```\n"
+        "/create message:\"Райд след 1 час!\" interval:120 repeat:0 id:\"raid\"\n"
+        "```\n"
+        "- `message`: Текст на съобщението\n"
+        "- `interval`: Интервал в минути\n"
+        "- `repeat`: Повторения (0 = безкрайно)\n"
+        "- `id`: Име на съобщението"
+    )
+    await interaction.response.send_message(example, ephemeral=True)
+
+# === Стартиране на бота ===
+bot.run(TOKEN)
