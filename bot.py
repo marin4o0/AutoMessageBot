@@ -5,42 +5,24 @@ from discord import app_commands
 import asyncio
 import json
 
-# === Environment Variables и проверки ===
+# === КОНФИГУРАЦИЯ ===
 TOKEN = os.getenv("DISCORD_TOKEN")
-CHANNEL_ID_ENV = os.getenv("DISCORD_CHANNEL_ID")
-GUILD_ID_ENV = os.getenv("GUILD_ID")  # твоя сървър
+CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
+GUILD_ID = int(os.getenv("GUILD_ID"))
+SAVE_FILE = "active_messages.json"
 
-if not TOKEN:
-    raise ValueError("❌ DISCORD_TOKEN не е зададено в environment variables")
-if not CHANNEL_ID_ENV:
-    raise ValueError("❌ DISCORD_CHANNEL_ID не е зададено в environment variables")
-if not GUILD_ID_ENV:
-    raise ValueError("❌ GUILD_ID не е зададено в environment variables")
-
-try:
-    CHANNEL_ID = int(CHANNEL_ID_ENV)
-except ValueError:
-    raise ValueError(f"❌ DISCORD_CHANNEL_ID трябва да е число, а е '{CHANNEL_ID_ENV}'")
-
-try:
-    GUILD_ID = int(GUILD_ID_ENV)
-except ValueError:
-    raise ValueError(f"❌ GUILD_ID трябва да е число, а е '{GUILD_ID_ENV}'")
-
-guild = discord.Object(id=GUILD_ID)
+# Роли с достъп до админ команди
+ALLOWED_ROLES = ["Admin", "Moderator"]
 
 # === Intents ===
 intents = discord.Intents.default()
-intents.presences = True
+intents.message_content = True
 intents.members = True
-intents.message_content = True  # нужно за командите и четене на съобщения
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
+guild = discord.Object(id=GUILD_ID)
 
-# === Конфигурация и променливи ===
-SAVE_FILE = "active_messages.json"
-ALLOWED_ROLES = ["Admin", "Moderator"]
 active_messages = {}  # ID → {данни, task, status, message_ref}
 
 # === Помощни функции ===
@@ -70,7 +52,6 @@ def save_messages():
 async def restart_message_task(msg_id, msg_data):
     if msg_data.get("status") != "active":
         return
-
     channel = bot.get_channel(CHANNEL_ID)
     if not channel:
         print(f"⚠️ Каналът с ID {CHANNEL_ID} не е намерен.")
@@ -105,13 +86,11 @@ async def update_embed_status(msg_id):
     msg_data = active_messages.get(msg_id)
     if not msg_data or not msg_data.get("embed_message_id"):
         return
-
     channel = bot.get_channel(CHANNEL_ID)
     try:
         embed_msg = await channel.fetch_message(msg_data["embed_message_id"])
     except discord.NotFound:
         return
-
     embed = discord.Embed(
         title=f"🆔 {msg_data['id']} ({msg_data['status']})",
         description=f"💬 {msg_data['message']}\n⏱️ Интервал: {msg_data['interval']} мин\n🔁 Повторения: {'∞' if msg_data['repeat']==0 else msg_data['repeat']}\n👤 От: {msg_data['creator']}",
@@ -172,12 +151,6 @@ class MessageButtons(discord.ui.View):
             if task:
                 task.cancel()
             save_messages()
-            try:
-                channel = bot.get_channel(CHANNEL_ID)
-                embed_msg = await channel.fetch_message(msg["embed_message_id"])
-                await embed_msg.delete()
-            except Exception:
-                pass
             await interaction.response.send_message(f"❌ '{self.msg_id}' е изтрито.", ephemeral=True)
         else:
             await interaction.response.send_message("❌ Не е намерено.", ephemeral=True)
@@ -186,7 +159,11 @@ class MessageButtons(discord.ui.View):
 @bot.event
 async def on_ready():
     print(f"✅ Влязъл съм като {bot.user}")
-    await tree.sync(guild=guild)  # локален sync за твоят сървър
+    try:
+        await tree.sync(guild=guild)
+        print(f"🔁 Командите са синхронизирани за guild {GUILD_ID}")
+    except Exception as e:
+        print(f"❌ Грешка при синхронизиране на командите: {e}")
     await load_messages()
     print("🔁 Възстановени активни съобщения.")
 
@@ -233,15 +210,6 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
     }
     active_messages[id] = msg_data
     save_messages()
-
-    embed = discord.Embed(
-        title=f"🆔 {id} (active)",
-        description=f"💬 {message}\n⏱️ Интервал: {interval} мин\n🔁 Повторения: {'∞' if repeat==0 else repeat}\n👤 От: {interaction.user.name}",
-        color=discord.Color.green()
-    )
-    sent = await channel.send(embed=embed, view=MessageButtons(id))
-    msg_data["embed_message_id"] = sent.id
-    save_messages()
     await interaction.response.send_message(f"✅ Създадено съобщение '{id}'.", ephemeral=True)
 
 @tree.command(name="list", description="Покажи всички съобщения с бутони.")
@@ -252,17 +220,21 @@ async def list_messages(interaction: discord.Interaction):
     if not active_messages:
         await interaction.response.send_message("ℹ️ Няма съобщения.", ephemeral=True)
         return
+
+    await interaction.response.send_message("📋 Всички активни съобщения:", ephemeral=True)
     for msg in active_messages.values():
         color = discord.Color.green() if msg["status"] == "active" else discord.Color.red()
         embed = discord.Embed(
             title=f"🆔 {msg['id']} ({msg['status']})",
-            description=f"💬 {msg['message']}\n⏱️ Интервал: {msg['interval']} мин\n🔁 Повторения: {'∞' if msg['repeat']==0 else msg['repeat']}\n👤 От: {msg['creator']}",
+            description=(
+                f"💬 {msg['message']}\n"
+                f"⏱️ Интервал: {msg['interval']} мин\n"
+                f"🔁 Повторения: {'∞' if msg['repeat']==0 else msg['repeat']}\n"
+                f"👤 От: {msg['creator']}"
+            ),
             color=color
         )
-        sent = await interaction.channel.send(embed=embed, view=MessageButtons(msg["id"]))
-        msg["embed_message_id"] = sent.id
-    save_messages()
-    await interaction.response.send_message("📋 Всички съобщения са показани по-долу.", ephemeral=True)
+        await interaction.followup.send(embed=embed, view=MessageButtons(msg["id"]), ephemeral=True)
 
 @tree.command(name="help_create", description="Показва пример за /create")
 async def help_create(interaction: discord.Interaction):
