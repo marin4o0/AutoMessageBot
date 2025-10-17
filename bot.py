@@ -5,10 +5,37 @@ from discord import app_commands
 import asyncio
 import json
 
-# === КОНФИГУРАЦИЯ (чрез process.env / Railway variables) ===
+# === БЕЗОПАСНО ЗАРЕЖДАНЕ НА ENV VARIABLES И INTENTS ===
 TOKEN = os.getenv("DISCORD_TOKEN")
-CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
+CHANNEL_ID_ENV = os.getenv("DISCORD_CHANNEL_ID")
+
+if not TOKEN:
+    raise ValueError("❌ DISCORD_TOKEN не е зададено в environment variables")
+if not CHANNEL_ID_ENV:
+    raise ValueError("❌ DISCORD_CHANNEL_ID не е зададено в environment variables")
+
+try:
+    CHANNEL_ID = int(CHANNEL_ID_ENV)
+except ValueError:
+    raise ValueError(f"❌ DISCORD_CHANNEL_ID трябва да е число, а е '{CHANNEL_ID_ENV}'")
+
+print(f"✅ Env variables заредени успешно. Канал ID: {CHANNEL_ID}")
+
+# РОЛИ, които имат достъп до админ команди
+ALLOWED_ROLES = ["Admin", "Moderator"]
+
+# Intents
+intents = discord.Intents.default()
+intents.presences = True
+intents.members = True
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+tree = bot.tree
+
+active_messages = {}  # ID → {данни, task, status, message_ref}
 SAVE_FILE = "active_messages.json"
+
 
 # РОЛИ, които имат достъп до админ команди
 ALLOWED_ROLES = ["Admin", "Moderator"]
