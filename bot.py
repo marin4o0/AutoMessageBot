@@ -2,6 +2,7 @@ import os
 import discord
 from discord.ext import commands
 from discord import app_commands
+from discord import Color, Embed
 import asyncio
 import json
 from typing import Optional
@@ -171,12 +172,11 @@ async def load_messages():
         await restart_message_task(msg_id)
         await update_embed_status(msg_id)
 
-def build_configuration_embed(msg_data: dict) -> discord.Embed:
+def build_configuration_embed(msg_data: dict) -> Embed:
     status = msg_data.get("status", "unknown")
-    color = discord.Color.green() if status == "active" else discord.Color.red()
+    color = Color.green() if status == "active" else Color.red()
     repeat_display = "∞" if msg_data.get("repeat") == 0 else str(msg_data.get("repeat", "-"))
-
-    embed = discord.Embed(
+    embed = Embed(
         title=f"🆔 {msg_data.get('id', 'unknown')} ({status})",
         color=color
     )
@@ -184,11 +184,7 @@ def build_configuration_embed(msg_data: dict) -> discord.Embed:
     embed.add_field(name="Interval", value=f"{msg_data.get('interval', '-') } мин", inline=True)
     embed.add_field(name="Repeat", value=repeat_display, inline=True)
     embed.add_field(name="Creator", value=msg_data.get("creator", "-") or "-", inline=False)
-
-    # ✅ Правилният начин за добавяне на timestamp в discord.py 2.4.0
-    import discord.utils
-    embed.timestamp = discord.utils.utcnow()
-
+    embed.set_timestamp()
     return embed
 
 async def update_embed_status(msg_id):
@@ -691,4 +687,3 @@ async def help_create(interaction: discord.Interaction):
 
 # === Стартиране на бота ===
 bot.run(TOKEN)
-
