@@ -59,6 +59,21 @@ def record_embed_message_id(msg_id: str, message_id: Optional[int]):
 def get_message_data(msg_id: str) -> Optional[dict]:
     return active_messages.get(msg_id)
 
+def update_message_content_value(msg_id: str, new_content: str):
+    if msg_id in active_messages:
+        active_messages[msg_id]["message"] = new_content
+        save_messages()
+
+def update_interval_value(msg_id: str, new_interval: int):
+    if msg_id in active_messages:
+        active_messages[msg_id]["interval"] = new_interval
+        save_messages()
+
+def update_repeat_value(msg_id: str, new_repeat: int):
+    if msg_id in active_messages:
+        active_messages[msg_id]["repeat"] = new_repeat
+        save_messages()
+
 # === EMBED ===
 def build_configuration_embed(msg_data: dict) -> discord.Embed:
     status = msg_data.get("status", "unknown")
@@ -143,6 +158,92 @@ async def restart_message_task(msg_id: str):
     msg_data["task"] = asyncio.create_task(task_func())
     save_messages()
 
+# === EDIT СИСТЕМА ===
+class EditSelect(discord.ui.Select):
+    def __init__(self, msg_id):
+        options = [
+            discord.SelectOption(label="Message Content", value="edit_content", emoji="📝"),
+            discord.SelectOption(label="Time Interval", value="edit_interval", emoji="⏱️"),
+            discord.SelectOption(label="Repeat Count", value="edit_repeat", emoji="🔁")
+        ]
+        super().__init__(placeholder="Избери какво да редактираш", options=options)
+        self.msg_id = msg_id
+
+    async def callback(self, interaction):
+        if not has_edit_permission(interaction.user):
+            return await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
+        if self.values[0] == "edit_content":
+            await interaction.response.send_modal(ContentEditModal(self.msg_id))
+        elif self.values[0] == "edit_interval":
+            await interaction.response.send_modal(IntervalEditModal(self.msg_id))
+        elif self.values[0] == "edit_repeat":
+            await interaction.response.send_modal(RepeatEditModal(self.msg_id))
+
+class EditSelectView(discord.ui.View):
+    def __init__(self, msg_id):
+        super().__init__(timeout=120)
+        self.add_item(EditSelect(msg_id))
+
+class ContentEditModal(discord.ui.Modal):
+    def __init__(self, msg_id):
+        super().__init__(title="Edit Message Content")
+        self.msg_id = msg_id
+        current = active_messages.get(msg_id, {}).get("message", "")
+        self.new_content = discord.ui.TextInput(label="New Message", style=discord.TextStyle.long, default=current)
+        self.add_item(self.new_content)
+
+    async def on_submit(self, interaction):
+        new_val = self.new_content.value.strip()
+        if not new_val:
+            return await interaction.response.send_message("⚠️ Съдържанието не може да е празно.", ephemeral=True)
+        update_message_content_value(self.msg_id, new_val)
+        await update_embed_status(self.msg_id)
+        await interaction.response.send_message("✅ Съдържанието е обновено.", ephemeral=True)
+
+class IntervalEditModal(discord.ui.Modal):
+    def __init__(self, msg_id):
+        super().__init__(title="Edit Interval (minutes)")
+        self.msg_id = msg_id
+        current = active_messages.get(msg_id, {}).get("interval", "")
+        self.new_interval = discord.ui.TextInput(label="Interval (min)", style=discord.TextStyle.short, default=str(current))
+        self.add_item(self.new_interval)
+
+    async def on_submit(self, interaction):
+        try:
+            val = int(self.new_interval.value)
+            if val <= 0:
+                raise ValueError
+            update_interval_value(self.msg_id, val)
+            msg = active_messages.get(self.msg_id)
+            if msg and msg.get("status") == "active":
+                await restart_message_task(self.msg_id)
+            await update_embed_status(self.msg_id)
+            await interaction.response.send_message("✅ Интервалът е обновен.", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("⚠️ Въведи валидно положително число.", ephemeral=True)
+
+class RepeatEditModal(discord.ui.Modal):
+    def __init__(self, msg_id):
+        super().__init__(title="Edit Repeat Count")
+        self.msg_id = msg_id
+        current = active_messages.get(msg_id, {}).get("repeat", "")
+        self.new_repeat = discord.ui.TextInput(label="Repeat Count (0 = ∞)", style=discord.TextStyle.short, default=str(current))
+        self.add_item(self.new_repeat)
+
+    async def on_submit(self, interaction):
+        try:
+            val = int(self.new_repeat.value)
+            if val < 0:
+                raise ValueError
+            update_repeat_value(self.msg_id, val)
+            msg = active_messages.get(self.msg_id)
+            if msg and msg.get("status") == "active":
+                await restart_message_task(self.msg_id)
+            await update_embed_status(self.msg_id)
+            await interaction.response.send_message("✅ Повторенията са обновени.", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("⚠️ Въведи валидно число.", ephemeral=True)
+
 # === VIEW С БУТОНИ ===
 class MessageButtons(discord.ui.View):
     def __init__(self, msg_id):
@@ -187,6 +288,15 @@ class MessageButtons(discord.ui.View):
         save_messages()
         await interaction.response.send_message("🗑️ Изтрито успешно.", ephemeral=True)
 
+    @discord.ui.button(emoji="✏️", style=discord.ButtonStyle.secondary)
+    async def edit_button(self, interaction, button):
+        if not has_edit_permission(interaction.user):
+            return await interaction.response.send_message("🚫 Нямаш права да редактираш.", ephemeral=True)
+        msg = active_messages.get(self.msg_id)
+        if not msg:
+            return await interaction.response.send_message("❌ Не е намерено.", ephemeral=True)
+        await interaction.response.send_message("Избери какво искаш да редактираш:", view=EditSelectView(self.msg_id), ephemeral=True)
+
 # === КОМАНДИ ===
 @bot.event
 async def on_ready():
@@ -208,7 +318,7 @@ async def create(interaction, message: str, interval: int, repeat: int, id: str)
     if not channel:
         return await interaction.response.send_message("⚠️ Каналът не е намерен.", ephemeral=True)
 
-    sent_msg = await channel.send(message)  # 👈 само самото съобщение е видимо
+    sent_msg = await channel.send(message)  # само видимото съобщение
 
     msg_data = {
         "task": None,
@@ -224,7 +334,6 @@ async def create(interaction, message: str, interval: int, repeat: int, id: str)
     save_messages()
     await restart_message_task(id)
 
-    # embed само за админа (ephemeral)
     embed = build_configuration_embed(msg_data)
     view = MessageButtons(id)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
@@ -235,10 +344,10 @@ async def list_messages(interaction):
         return await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
     if not active_messages:
         return await interaction.response.send_message("ℹ️ Няма активни съобщения.", ephemeral=True)
+    await interaction.response.send_message("📋 Списък с активни съобщения:", ephemeral=True)
     for msg in active_messages.values():
         embed = build_configuration_embed(msg)
         await interaction.followup.send(embed=embed, view=MessageButtons(msg["id"]), ephemeral=True)
-    await interaction.response.send_message("📋 Списък с активни съобщения:", ephemeral=True)
 
 # === СТАРТ ===
 bot.run(TOKEN)
