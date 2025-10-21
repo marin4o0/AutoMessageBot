@@ -6,13 +6,12 @@ import asyncio
 import json
 from typing import Optional
 
-# === КОНФИГУРАЦИЯ ===
+# === CONFIG ===
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
 GUILD_ID = int(os.getenv("GUILD_ID"))
 SAVE_FILE = "active_messages.json"
 
-# Роли с достъп до админ команди
 ALLOWED_ROLES = ["Admin", "Moderator"]
 
 # === Intents ===
@@ -24,9 +23,9 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 guild = discord.Object(id=GUILD_ID)
 
-active_messages = {}  # ID → {данни, task, status, message_ref}
+active_messages = {}  # ID → {data, task, status, count, embed_message_id}
 
-# === Помощни функции ===
+# === Helpers ===
 def has_permission(user: discord.Member) -> bool:
     if user.guild_permissions.administrator:
         return True
@@ -36,7 +35,6 @@ def has_permission(user: discord.Member) -> bool:
     return False
 
 def has_edit_permission(member: discord.Member) -> bool:
-    """Return True if the member can access edit operations."""
     return has_permission(member)
 
 def save_messages():
@@ -49,6 +47,7 @@ def save_messages():
             "id": msg["id"],
             "creator": msg["creator"],
             "status": msg.get("status", "active"),
+            "count": msg.get("count", 0),
             "embed_message_id": msg.get("embed_message_id")
         }
     with open(SAVE_FILE, "w", encoding="utf-8") as f:
@@ -103,8 +102,8 @@ def update_repeat_value(msg_id: str, new_repeat: int) -> None:
     data["repeat"] = new_repeat
     save_messages()
 
-# === Message Scheduler ===
-async def restart_message_task(msg_id: str):
+# === Scheduler ===
+async def restart_message_task(msg_id: str, send_immediately: bool = True):
     msg_data = active_messages.get(msg_id)
     if not msg_data:
         return
@@ -125,20 +124,23 @@ async def restart_message_task(msg_id: str):
         save_messages()
         return
 
+    if "count" not in msg_data:
+        msg_data["count"] = 0
+
     async def task_func():
-        count = 0
-        completed_naturally = False
         try:
             while True:
-                if msg_data["repeat"] != 0 and count >= msg_data["repeat"]:
-                    completed_naturally = True
+                if msg_data["repeat"] != 0 and msg_data["count"] >= msg_data["repeat"]:
+                    msg_data["status"] = "stopped"
                     break
-                await channel.send(msg_data["message"])
-                count += 1
+
+                if send_immediately or msg_data["count"] > 0:
+                    await channel.send(msg_data["message"])
+                msg_data["count"] += 1
 
                 interval_minutes = msg_data.get("interval", 0)
                 if interval_minutes <= 0:
-                    completed_naturally = True
+                    msg_data["status"] = "stopped"
                     break
                 try:
                     await asyncio.sleep(interval_minutes * 60)
@@ -146,17 +148,10 @@ async def restart_message_task(msg_id: str):
                     raise
         except asyncio.CancelledError:
             pass
-        else:
-            completed_naturally = True
         finally:
-            current_data = active_messages.get(msg_id)
-            if not current_data:
-                return
-            current_data["task"] = None
-            if completed_naturally:
-                current_data["status"] = "stopped"
-                await update_embed_status(msg_id)
-                save_messages()
+            msg_data["task"] = None
+            await update_embed_status(msg_id)
+            save_messages()
 
     msg_data["task"] = asyncio.create_task(task_func())
     save_messages()
@@ -169,7 +164,7 @@ async def load_messages():
     for msg_id, msg in data.items():
         active_messages[msg_id] = msg
         active_messages[msg_id]["task"] = None
-        await restart_message_task(msg_id)
+        await restart_message_task(msg_id, send_immediately=False)
         await update_embed_status(msg_id)
 
 # === Embed Builder ===
@@ -219,7 +214,7 @@ async def update_embed_status(msg_id):
     except discord.HTTPException as error:
         print(f"❌ Неуспешно обновяване на embed за {msg_id}: {error}")
 
-# === Buttons ===
+# === Views / Buttons / Modals ===
 class MessageButtons(discord.ui.View):
     def __init__(self, msg_id):
         super().__init__(timeout=None)
@@ -313,7 +308,6 @@ class MessageButtons(discord.ui.View):
             print(f"❌ Грешка при показване на меню за редакция ({self.msg_id}): {e}")
 
 
-# === Edit Select & Modal ===
 class EditSelect(discord.ui.Select):
     def __init__(self, msg_id: str):
         options = [
@@ -388,6 +382,7 @@ class ContentEditModal(discord.ui.Modal):
 
         update_message_content_value(self.msg_id, new_content)
         await update_embed_status(self.msg_id)
+        # НЕ рестартираме задачата → няма ново изпращане
         await interaction.response.send_message("✅ Съобщението беше обновено.", ephemeral=True)
 
 
@@ -423,7 +418,7 @@ class IntervalEditModal(discord.ui.Modal):
 
         update_interval_value(self.msg_id, new_interval)
         if msg.get("status") == "active":
-            await restart_message_task(self.msg_id)
+            await restart_message_task(self.msg_id, send_immediately=False)
         await update_embed_status(self.msg_id)
         await interaction.response.send_message("✅ Интервалът беше обновен.", ephemeral=True)
 
@@ -460,7 +455,7 @@ class TimerEditModal(discord.ui.Modal):
 
         update_repeat_value(self.msg_id, new_repeat)
         if msg.get("status") == "active":
-            await restart_message_task(self.msg_id)
+            await restart_message_task(self.msg_id, send_immediately=False)
         await update_embed_status(self.msg_id)
         await interaction.response.send_message("✅ Настройката на повторенията беше обновена.", ephemeral=True)
 
@@ -509,6 +504,7 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
         "id": id,
         "creator": interaction.user.name,
         "status": "active",
+        "count": 0,
         "embed_message_id": None
     }
     active_messages[id] = msg_data
@@ -560,5 +556,6 @@ async def help_create(interaction: discord.Interaction):
     )
     await interaction.response.send_message(example, ephemeral=True)
 
-# === Стартиране на бота ===
+
+# === Run Bot ===
 bot.run(TOKEN)
