@@ -34,9 +34,6 @@ def has_permission(user: discord.Member) -> bool:
             return True
     return False
 
-def has_edit_permission(member: discord.Member) -> bool:
-    return has_permission(member)
-
 def save_messages():
     data = {}
     for msg_id, msg in active_messages.items():
@@ -52,7 +49,79 @@ def save_messages():
     with open(SAVE_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-# === Helpers за embed ===
+async def restart_message_task(msg_id: str, start_immediately: bool = True):
+    msg_data = active_messages.get(msg_id)
+    if not msg_data:
+        return
+
+    existing_task = msg_data.get("task")
+    if existing_task:
+        existing_task.cancel()
+
+    if msg_data.get("status") != "active":
+        msg_data["task"] = None
+        return
+
+    target_channel_id = msg_data.get("channel_id") or CHANNEL_ID
+    channel = bot.get_channel(target_channel_id) if target_channel_id else None
+    if not channel:
+        print(f"⚠️ Каналът с ID {target_channel_id} не е намерен за задача {msg_id}.")
+        msg_data["status"] = "stopped"
+        msg_data["task"] = None
+        save_messages()
+        return
+
+    async def task_func():
+        count = 0
+        completed_naturally = False
+        try:
+            interval_minutes = msg_data.get("interval", 0)
+            if not start_immediately and interval_minutes > 0:
+                try:
+                    await asyncio.sleep(interval_minutes * 60)
+                except asyncio.CancelledError:
+                    raise
+
+            while True:
+                if msg_data.get("repeat", 0) != 0 and count >= msg_data.get("repeat", 0):
+                    completed_naturally = True
+                    break
+                try:
+                    await channel.send(msg_data.get("message", ""))
+                except Exception as e:
+                    print(f"❌ Грешка при пращане на съобщение ({msg_id}): {e}")
+                count += 1
+                if interval_minutes <= 0:
+                    completed_naturally = True
+                    break
+                try:
+                    await asyncio.sleep(interval_minutes * 60)
+                except asyncio.CancelledError:
+                    raise
+        except asyncio.CancelledError:
+            pass
+        finally:
+            current_data = active_messages.get(msg_id)
+            if current_data:
+                current_data["task"] = None
+                if completed_naturally:
+                    current_data["status"] = "stopped"
+                    save_messages()
+
+    msg_data["task"] = asyncio.create_task(task_func())
+    save_messages()
+
+async def load_messages():
+    if not os.path.exists(SAVE_FILE):
+        return
+    with open(SAVE_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    for msg_id, msg in data.items():
+        active_messages[msg_id] = msg
+        active_messages[msg_id]["task"] = None
+        await restart_message_task(msg_id, start_immediately=True)
+
+# === Embed Helper ===
 def build_info_embed(msg_data: dict) -> discord.Embed:
     status = msg_data.get("status", "unknown")
     color = discord.Color.green() if status == "active" else discord.Color.red()
@@ -69,7 +138,7 @@ def build_info_embed(msg_data: dict) -> discord.Embed:
     embed.timestamp = datetime.utcnow()
     return embed
 
-# === Views и модали ===
+# === Views и бутони ===
 class MessageButtons(discord.ui.View):
     def __init__(self, msg_id):
         super().__init__(timeout=None)
@@ -77,82 +146,71 @@ class MessageButtons(discord.ui.View):
 
     @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.green)
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        msg = active_messages.get(self.msg_id)
+        if not msg:
+            await interaction.response.send_message("❌ Съобщението не съществува.", ephemeral=True)
+            return
         if not has_permission(interaction.user):
             await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
             return
-        msg = active_messages.get(self.msg_id)
         if msg["status"] == "active":
             await interaction.response.send_message("⚠️ Вече е активно.", ephemeral=True)
             return
         msg["status"] = "active"
+        await restart_message_task(self.msg_id)
         await interaction.response.send_message(f"▶️ '{self.msg_id}' стартирано.", ephemeral=True)
 
     @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.blurple)
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        msg = active_messages.get(self.msg_id)
+        if not msg:
+            await interaction.response.send_message("❌ Съобщението не съществува.", ephemeral=True)
+            return
         if not has_permission(interaction.user):
             await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
             return
-        msg = active_messages.get(self.msg_id)
         msg["status"] = "stopped"
+        task = msg.get("task")
+        if task:
+            task.cancel()
         await interaction.response.send_message(f"⏹️ '{self.msg_id}' е спряно.", ephemeral=True)
 
     @discord.ui.button(emoji="❌", style=discord.ButtonStyle.gray)
     async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not has_permission(interaction.user):
-            await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
-            return
-        active_messages.pop(self.msg_id, None)
+        msg = active_messages.pop(self.msg_id, None)
+        if msg and msg.get("task"):
+            msg["task"].cancel()
         await interaction.response.send_message(f"❌ '{self.msg_id}' изтрито.", ephemeral=True)
 
-# Модали за edit
-class ContentEditModal(discord.ui.Modal):
-    def __init__(self, msg_id: str):
-        super().__init__(title="Edit Message Content")
-        self.msg_id = msg_id
-        self.new_content = discord.ui.TextInput(label="New Message Content", default=get_stored_message_content(msg_id)[:1900])
-        self.add_item(self.new_content)
+# === Commands /create и /list ===
+@tree.command(name="create", description="Създай ново автоматично съобщение.")
+@app_commands.describe(message="Текст на съобщението", interval="Интервал в минути", repeat="Брой повторения (0=∞)", id="Уникален идентификатор", channel="Канал за съобщението")
+async def create(interaction: discord.Interaction, message: str, interval: int, repeat: int, id: str, channel: Optional[discord.TextChannel] = None):
+    if not has_permission(interaction.user):
+        await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
+        return
+    if id in active_messages:
+        await interaction.response.send_message(f"⚠️ Съобщение с id '{id}' вече съществува.", ephemeral=True)
+        return
+    channel_id_for_task = channel.id if channel else (CHANNEL_ID if CHANNEL_ID else None)
+    if channel_id_for_task is None:
+        await interaction.response.send_message("❌ Не е зададен канал.", ephemeral=True)
+        return
+    msg_data = {
+        "task": None,
+        "message": message,
+        "interval": interval,
+        "repeat": repeat,
+        "id": id,
+        "creator": interaction.user.name,
+        "status": "active",
+        "channel_id": channel_id_for_task
+    }
+    active_messages[id] = msg_data
+    save_messages()
+    await restart_message_task(id, start_immediately=True)
+    await interaction.response.send_message(f"✅ Създадено съобщение '{id}'.", ephemeral=True)
 
-    async def on_submit(self, interaction: discord.Interaction):
-        update_message_content_value(self.msg_id, self.new_content.value)
-        await interaction.response.send_message("✅ Съобщението беше обновено.", ephemeral=True)
-
-class IntervalEditModal(discord.ui.Modal):
-    def __init__(self, msg_id: str):
-        super().__init__(title="Edit Interval")
-        self.msg_id = msg_id
-        self.new_interval = discord.ui.TextInput(label="Interval (minutes)", default=str(get_stored_interval(msg_id) or 0))
-        self.add_item(self.new_interval)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        update_interval_value(self.msg_id, int(self.new_interval.value))
-        await interaction.response.send_message("✅ Интервалът беше обновен.", ephemeral=True)
-
-class RepeatEditModal(discord.ui.Modal):
-    def __init__(self, msg_id: str):
-        super().__init__(title="Edit Repeat Count")
-        self.msg_id = msg_id
-        self.new_repeat = discord.ui.TextInput(label="Repeat count (0=∞)", default=str(get_stored_repeat(msg_id) or 0))
-        self.add_item(self.new_repeat)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        update_repeat_value(self.msg_id, int(self.new_repeat.value))
-        await interaction.response.send_message("✅ Повторенията бяха обновени.", ephemeral=True)
-
-class ChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, msg_id: str):
-        super().__init__(custom_id=f"channel_select_{msg_id}", placeholder="Избери текстов канал", channel_types=[discord.ChannelType.text])
-        self.msg_id = msg_id
-
-    async def callback(self, interaction: discord.Interaction):
-        update_channel_value(self.msg_id, self.values[0].id)
-        await interaction.response.send_message(f"✅ Каналът беше обновен.", ephemeral=True)
-
-class ChannelSelectView(discord.ui.View):
-    def __init__(self, msg_id: str):
-        super().__init__(timeout=120)
-        self.add_item(ChannelSelect(msg_id))
-
-# === Команди ===
 @tree.command(name="list", description="Покажи всички съобщения с бутони.")
 async def list_messages(interaction: discord.Interaction):
     if not has_permission(interaction.user):
