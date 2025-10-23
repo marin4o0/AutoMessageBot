@@ -23,7 +23,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 guild = discord.Object(id=GUILD_ID) if GUILD_ID else None
 
-active_messages = {}  # id -> {task, message, interval, repeat, id, creator, status, embed_message_id, channel_id}
+active_messages = {}
 
 # === Помощни функции ===
 def has_permission(user: discord.Member) -> bool:
@@ -47,7 +47,6 @@ def save_messages():
             "id": msg.get("id"),
             "creator": msg.get("creator"),
             "status": msg.get("status", "active"),
-            "embed_message_id": msg.get("embed_message_id"),
             "channel_id": msg.get("channel_id", None)
         }
     with open(SAVE_FILE, "w", encoding="utf-8") as f:
@@ -179,7 +178,7 @@ async def load_messages():
         active_messages[msg_id]["task"] = None
         await restart_message_task(msg_id, start_immediately=True)
 
-# === View и Modal класи ===
+# === Views и Modals ===
 class MessageButtons(discord.ui.View):
     def __init__(self, msg_id):
         super().__init__(timeout=None)
@@ -257,6 +256,7 @@ class EditSelectView(discord.ui.View):
         super().__init__(timeout=120)
         self.add_item(EditSelect(msg_id))
 
+# === Modals за съдържание, интервал, repeat и канал ===
 class ContentEditModal(discord.ui.Modal):
     def __init__(self, msg_id: str):
         super().__init__(title="Edit Message Content")
@@ -271,8 +271,8 @@ class ContentEditModal(discord.ui.Modal):
             await restart_message_task(self.msg_id, start_immediately=False)
         await interaction.response.send_message("✅ Съобщението беше обновено.", ephemeral=True)
 
-# Interval, Repeat и Channel модали/класове се създават по същия принцип с ephemeral
-# --- заради дължина, могат да бъдат копирани от ContentEditModal с промяна на полетата ---
+# IntervalEditModal, RepeatEditModal и ChannelSelectView се създават по същия принцип с ephemeral=True
+# --- могат да бъдат копирани и адаптирани от ContentEditModal ---
 
 # === Команди ===
 @bot.event
@@ -308,7 +308,6 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
         "id": id,
         "creator": interaction.user.name,
         "status": "active",
-        "embed_message_id": None,
         "channel_id": channel_id_for_task
     }
     active_messages[id] = msg_data
