@@ -186,42 +186,55 @@ def build_info_embed(msg_data: dict) -> discord.Embed:
     embed.timestamp = datetime.utcnow()
     return embed
 
-# === Edit Modal ===
+# === Edit Modal с Channel TextInput ===
 class EditModal(discord.ui.Modal):
-    def __init__(self, msg_id: str):
+    def __init__(self, msg_id: str, guild: discord.Guild):
         super().__init__(title="Edit Message")
         self.msg_id = msg_id
+        self.guild = guild
+
         self.content_input = discord.ui.TextInput(label="Message", default=get_stored_message_content(msg_id)[:1900])
         self.interval_input = discord.ui.TextInput(label="Interval (minutes)", default=str(get_stored_interval(msg_id) or 0))
         self.repeat_input = discord.ui.TextInput(label="Repeat count (0=∞)", default=str(get_stored_repeat(msg_id) or 0))
+        self.channel_input = discord.ui.TextInput(label="Channel (name or ID)", default="")
+
         self.add_item(self.content_input)
         self.add_item(self.interval_input)
         self.add_item(self.repeat_input)
+        self.add_item(self.channel_input)
 
     async def on_submit(self, interaction: discord.Interaction):
+        # Update message, interval, repeat
         update_message_content_value(self.msg_id, self.content_input.value)
         update_interval_value(self.msg_id, int(self.interval_input.value))
         update_repeat_value(self.msg_id, int(self.repeat_input.value))
+
+        # Update channel
+        channel_value = self.channel_input.value.strip()
+        new_channel_id = None
+        if channel_value.isdigit():
+            new_channel_id = int(channel_value)
+            channel_obj = self.guild.get_channel(new_channel_id)
+            if not channel_obj or not isinstance(channel_obj, discord.TextChannel):
+                await interaction.response.send_message(f"❌ Канал с ID {new_channel_id} не съществува.", ephemeral=True)
+                return
+        elif channel_value:
+            channel_obj = discord.utils.get(self.guild.text_channels, name=channel_value)
+            if not channel_obj:
+                await interaction.response.send_message(f"❌ Канал с име '{channel_value}' не е намерен.", ephemeral=True)
+                return
+            new_channel_id = channel_obj.id
+
+        if new_channel_id:
+            update_channel_value(self.msg_id, new_channel_id)
+
         await interaction.response.send_message("✅ Съобщението беше обновено.", ephemeral=True)
-# === ChannelSelect Dropdown ===
-class ChannelSelect(discord.ui.Select):
-    def __init__(self, msg_id: str):
-        self.msg_id = msg_id
-        options = []
-        for guild_channel in bot.get_all_channels():
-            if isinstance(guild_channel, discord.TextChannel):
-                options.append(discord.SelectOption(label=guild_channel.name, value=str(guild_channel.id)))
-        super().__init__(placeholder="Избери канал", min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        update_channel_value(self.msg_id, int(self.values[0]))
-        await interaction.response.send_message("✅ Каналът беше обновен.", ephemeral=True)
-
 # === FullMessageButtons с callback функции ===
 class FullMessageButtons(discord.ui.View):
-    def __init__(self, msg_id: str):
+    def __init__(self, msg_id: str, guild: discord.Guild):
         super().__init__(timeout=None)
         self.msg_id = msg_id
+        self.guild = guild
 
     @discord.ui.button(label="Start", style=discord.ButtonStyle.green)
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -266,7 +279,7 @@ class FullMessageButtons(discord.ui.View):
         if not has_permission(interaction.user):
             await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
             return
-        await interaction.response.send_modal(EditModal(self.msg_id))
+        await interaction.response.send_modal(EditModal(self.msg_id, self.guild))
 
 # === Commands /create и /list ===
 @tree.command(name="create", description="Създай ново автоматично съобщение.")
@@ -314,7 +327,7 @@ async def list_messages(interaction: discord.Interaction):
     await interaction.response.send_message("📋 Всички съобщения:", ephemeral=True)
     for msg in active_messages.values():
         embed = build_info_embed(msg)
-        await interaction.followup.send(embed=embed, view=FullMessageButtons(msg['id']), ephemeral=True)
+        await interaction.followup.send(embed=embed, view=FullMessageButtons(msg['id'], interaction.guild), ephemeral=True)
 
 # === Стартиране на бота ===
 @bot.event
