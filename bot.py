@@ -5,6 +5,7 @@ from discord import app_commands
 import asyncio
 import json
 from typing import Optional
+from datetime import datetime
 
 # === КОНФИГУРАЦИЯ ===
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -832,4 +833,5 @@ if not TOKEN:
     print("❌ Грешка: Не е зададен DISCORD_TOKEN като env променлива.")
 else:
     bot.run(TOKEN)
+
 
