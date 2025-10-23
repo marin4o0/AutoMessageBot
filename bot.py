@@ -177,23 +177,23 @@ def build_info_embed(msg_data: dict) -> discord.Embed:
     channel_id = msg_data.get('channel_id')
     channel_mention = f'<#{channel_id}>' if channel_id else '—'
 
-    embed = discord.Embed(title=f"🆔 {msg_data.get('id')} ({status})", color=color)
+    embed = discord.Embed(title=f\"🆔 {msg_data.get('id')} ({status})\", color=color)
     embed.add_field(name="Message", value=msg_data.get('message', '-'), inline=False)
-    embed.add_field(name="Interval", value=f"{msg_data.get('interval', '-') } мин", inline=True)
+    embed.add_field(name="Interval", value=f\"{msg_data.get('interval', '-') } мин\", inline=True)
     embed.add_field(name="Repeat", value=repeat_display, inline=True)
-    embed.add_field(name="Creator", value=f"{msg_data.get('creator', '-')}", inline=False)
+    embed.add_field(name="Creator", value=f\"{msg_data.get('creator', '-')}\", inline=False)
     embed.add_field(name="Channel", value=channel_mention, inline=False)
     embed.timestamp = datetime.utcnow()
     return embed
 
-# === Edit Modal и ChannelSelect ===
+# === Edit Modal ===
 class EditModal(discord.ui.Modal):
     def __init__(self, msg_id: str):
-        super().__init__(title="Edit Message")
+        super().__init__(title=\"Edit Message\")
         self.msg_id = msg_id
-        self.content_input = discord.ui.TextInput(label="Message", default=get_stored_message_content(msg_id)[:1900])
-        self.interval_input = discord.ui.TextInput(label="Interval (minutes)", default=str(get_stored_interval(msg_id) or 0))
-        self.repeat_input = discord.ui.TextInput(label="Repeat count (0=∞)", default=str(get_stored_repeat(msg_id) or 0))
+        self.content_input = discord.ui.TextInput(label=\"Message\", default=get_stored_message_content(msg_id)[:1900])
+        self.interval_input = discord.ui.TextInput(label=\"Interval (minutes)\", default=str(get_stored_interval(msg_id) or 0))
+        self.repeat_input = discord.ui.TextInput(label=\"Repeat count (0=∞)\", default=str(get_stored_repeat(msg_id) or 0))
         self.add_item(self.content_input)
         self.add_item(self.interval_input)
         self.add_item(self.repeat_input)
@@ -202,8 +202,9 @@ class EditModal(discord.ui.Modal):
         update_message_content_value(self.msg_id, self.content_input.value)
         update_interval_value(self.msg_id, int(self.interval_input.value))
         update_repeat_value(self.msg_id, int(self.repeat_input.value))
-        await interaction.response.send_message("✅ Съобщението беше обновено.", ephemeral=True)
+        await interaction.response.send_message(\"✅ Съобщението беше обновено.\", ephemeral=True)
 
+# === ChannelSelect Dropdown ===
 class ChannelSelect(discord.ui.Select):
     def __init__(self, msg_id: str):
         self.msg_id = msg_id
@@ -217,19 +218,58 @@ class ChannelSelect(discord.ui.Select):
         update_channel_value(self.msg_id, int(self.values[0]))
         await interaction.response.send_message("✅ Каналът беше обновен.", ephemeral=True)
 
-# === FullMessageButtons с Edit бутон ===
+# === FullMessageButtons с callback функции ===
 class FullMessageButtons(discord.ui.View):
     def __init__(self, msg_id: str):
         super().__init__(timeout=None)
         self.msg_id = msg_id
-        # Старт, стоп и изтриване
-        self.add_item(discord.ui.Button(label="Start", style=discord.ButtonStyle.green, custom_id=f"start_{msg_id}"))
-        self.add_item(discord.ui.Button(label="Stop", style=discord.ButtonStyle.blurple, custom_id=f"stop_{msg_id}"))
-        self.add_item(discord.ui.Button(label="Delete", style=discord.ButtonStyle.red, custom_id=f"delete_{msg_id}"))
-        # Edit бутон
-        self.add_item(discord.ui.Button(label="Edit", style=discord.ButtonStyle.blurple, custom_id=f"edit_{msg_id}"))
 
-# === Commands /create and /list ===
+    @discord.ui.button(label="Start", style=discord.ButtonStyle.green)
+    async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_permission(interaction.user):
+            await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
+            return
+        msg = active_messages.get(self.msg_id)
+        if not msg or msg.get("status") == "active":
+            await interaction.response.send_message("⚠️ Вече е активно или не съществува.", ephemeral=True)
+            return
+        msg["status"] = "active"
+        await restart_message_task(self.msg_id)
+        await interaction.response.send_message(f"▶️ '{self.msg_id}' стартирано.", ephemeral=True)
+
+    @discord.ui.button(label="Stop", style=discord.ButtonStyle.blurple)
+    async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_permission(interaction.user):
+            await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
+            return
+        msg = active_messages.get(self.msg_id)
+        if not msg:
+            await interaction.response.send_message("❌ Съобщението не съществува.", ephemeral=True)
+            return
+        msg["status"] = "stopped"
+        task = msg.get("task")
+        if task:
+            task.cancel()
+        await interaction.response.send_message(f"⏹️ '{self.msg_id}' е спряно.", ephemeral=True)
+
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.red)
+    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_permission(interaction.user):
+            await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
+            return
+        msg = active_messages.pop(self.msg_id, None)
+        if msg and msg.get("task"):
+            msg["task"].cancel()
+        await interaction.response.send_message(f"❌ '{self.msg_id}' изтрито.", ephemeral=True)
+
+    @discord.ui.button(label="Edit", style=discord.ButtonStyle.blurple)
+    async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_permission(interaction.user):
+            await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
+            return
+        await interaction.response.send_modal(EditModal(self.msg_id))
+
+# === Commands /create и /list ===
 @tree.command(name="create", description="Създай ново автоматично съобщение.")
 @app_commands.describe(
     message="Текст на съобщението",
