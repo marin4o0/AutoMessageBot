@@ -175,13 +175,13 @@ def build_info_embed(msg_data: dict) -> discord.Embed:
     color = discord.Color.green() if status == "active" else discord.Color.red()
     repeat_display = '∞' if msg_data.get('repeat', 0) == 0 else str(msg_data.get('repeat'))
     channel_id = msg_data.get('channel_id')
-    channel_mention = f'<#{channel_id}>' if channel_id else '—'
+    channel_mention = f"<#{channel_id}>" if channel_id else "—"
 
-    embed = discord.Embed(title=f\"🆔 {msg_data.get('id')} ({status})\", color=color)
+    embed = discord.Embed(title=f"🆔 {msg_data.get('id')} ({status})", color=color)
     embed.add_field(name="Message", value=msg_data.get('message', '-'), inline=False)
-    embed.add_field(name="Interval", value=f\"{msg_data.get('interval', '-') } мин\", inline=True)
+    embed.add_field(name="Interval", value=f"{msg_data.get('interval', '-') } мин", inline=True)
     embed.add_field(name="Repeat", value=repeat_display, inline=True)
-    embed.add_field(name="Creator", value=f\"{msg_data.get('creator', '-')}\", inline=False)
+    embed.add_field(name="Creator", value=f"{msg_data.get('creator', '-')}", inline=False)
     embed.add_field(name="Channel", value=channel_mention, inline=False)
     embed.timestamp = datetime.utcnow()
     return embed
@@ -189,11 +189,11 @@ def build_info_embed(msg_data: dict) -> discord.Embed:
 # === Edit Modal ===
 class EditModal(discord.ui.Modal):
     def __init__(self, msg_id: str):
-        super().__init__(title=\"Edit Message\")
+        super().__init__(title="Edit Message")
         self.msg_id = msg_id
-        self.content_input = discord.ui.TextInput(label=\"Message\", default=get_stored_message_content(msg_id)[:1900])
-        self.interval_input = discord.ui.TextInput(label=\"Interval (minutes)\", default=str(get_stored_interval(msg_id) or 0))
-        self.repeat_input = discord.ui.TextInput(label=\"Repeat count (0=∞)\", default=str(get_stored_repeat(msg_id) or 0))
+        self.content_input = discord.ui.TextInput(label="Message", default=get_stored_message_content(msg_id)[:1900])
+        self.interval_input = discord.ui.TextInput(label="Interval (minutes)", default=str(get_stored_interval(msg_id) or 0))
+        self.repeat_input = discord.ui.TextInput(label="Repeat count (0=∞)", default=str(get_stored_repeat(msg_id) or 0))
         self.add_item(self.content_input)
         self.add_item(self.interval_input)
         self.add_item(self.repeat_input)
@@ -202,8 +202,7 @@ class EditModal(discord.ui.Modal):
         update_message_content_value(self.msg_id, self.content_input.value)
         update_interval_value(self.msg_id, int(self.interval_input.value))
         update_repeat_value(self.msg_id, int(self.repeat_input.value))
-        await interaction.response.send_message(\"✅ Съобщението беше обновено.\", ephemeral=True)
-
+        await interaction.response.send_message("✅ Съобщението беше обновено.", ephemeral=True)
 # === ChannelSelect Dropdown ===
 class ChannelSelect(discord.ui.Select):
     def __init__(self, msg_id: str):
