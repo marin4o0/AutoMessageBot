@@ -430,3 +430,8 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
     await restart_message_task(id, start_immediately=True)
     await update_embed_status(id)
     await interaction.response.send_message(f"✅ Създадено съобщение '{id}' в канал {channel.mention}.", ephemeral=True)
+# === Стартиране на бота ===
+if not TOKEN:
+    print("❌ Не е зададен DISCORD_TOKEN.")
+else:
+    bot.run(TOKEN)
