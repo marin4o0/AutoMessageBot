@@ -5,7 +5,7 @@ from discord import app_commands
 import asyncio
 import json
 from typing import Optional
-from datetime import datetime  # <-- FIX за NameError
+from datetime import datetime  # fix за NameError
 
 # === КОНФИГУРАЦИЯ ===
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -13,7 +13,6 @@ CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
 GUILD_ID = int(os.getenv("GUILD_ID"))
 SAVE_FILE = "active_messages.json"
 
-# Роли с достъп до админ команди
 ALLOWED_ROLES = ["Admin", "Moderator"]
 
 # === Intents ===
@@ -203,7 +202,6 @@ async def update_embed_status(msg_id: str, interaction: Optional[discord.Interac
             if not channel:
                 print(f"⚠️ Каналът с ID {CHANNEL_ID} не е намерен за обновяване на {msg_id}.")
                 return
-
             if embed_message_id:
                 try:
                     embed_msg = await channel.fetch_message(embed_message_id)
@@ -218,15 +216,97 @@ async def update_embed_status(msg_id: str, interaction: Optional[discord.Interac
 
 # === View с бутони ===
 class MessageButtons(discord.ui.View):
-    def __init__(self, msg_id):
+    def __init__(self, msg_id: str):
         super().__init__(timeout=None)
         self.msg_id = msg_id
-        self.start_button.custom_id = f"start_message_{msg_id}"
-        self.stop_button.custom_id = f"stop_message_{msg_id}"
-        self.delete_button.custom_id = f"delete_message_{msg_id}"
-        self.edit_button.custom_id = f"edit_message_{msg_id}"
 
-    # … (тук остават бутоните без промяна) …
+        # Създаваме бутоните
+        self.start_button = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.green, custom_id=f"start_message_{msg_id}")
+        self.stop_button = discord.ui.Button(emoji="⏹️", style=discord.ButtonStyle.blurple, custom_id=f"stop_message_{msg_id}")
+        self.delete_button = discord.ui.Button(emoji="❌", style=discord.ButtonStyle.red, custom_id=f"delete_message_{msg_id}")
+        self.edit_button = discord.ui.Button(emoji="✏️", style=discord.ButtonStyle.secondary, custom_id=f"edit_message_{msg_id}")
+
+        # Добавяме бутоните към view
+        self.add_item(self.start_button)
+        self.add_item(self.stop_button)
+        self.add_item(self.delete_button)
+        self.add_item(self.edit_button)
+
+        # Свързваме callback функции
+        self.start_button.callback = self.start_callback
+        self.stop_button.callback = self.stop_callback
+        self.delete_button.callback = self.delete_callback
+        self.edit_button.callback = self.edit_callback
+
+    # === Callbacks ===
+    async def start_callback(self, interaction: discord.Interaction):
+        if not has_permission(interaction.user):
+            await interaction.response.send_message("🚫 Нямаш права за тази операция.", ephemeral=True)
+            return
+        msg = active_messages.get(self.msg_id)
+        if not msg:
+            await interaction.response.send_message("❌ Не е намерено.", ephemeral=True)
+            return
+        if msg["status"] == "active":
+            await interaction.response.send_message("⚠️ Вече е активно.", ephemeral=True)
+            return
+        msg["status"] = "active"
+        await restart_message_task(self.msg_id)
+        await update_embed_status(self.msg_id, interaction=interaction)
+        save_messages()
+        await interaction.followup.send(f"▶️ '{self.msg_id}' стартира отново.", ephemeral=True)
+
+    async def stop_callback(self, interaction: discord.Interaction):
+        if not has_permission(interaction.user):
+            await interaction.response.send_message("🚫 Нямаш права за тази операция.", ephemeral=True)
+            return
+        msg = active_messages.get(self.msg_id)
+        if not msg:
+            await interaction.response.send_message("❌ Не е намерено.", ephemeral=True)
+            return
+        task = msg.get("task")
+        if task:
+            task.cancel()
+        msg["status"] = "stopped"
+        msg["task"] = None
+        await update_embed_status(self.msg_id, interaction=interaction)
+        save_messages()
+        await interaction.followup.send(f"⏹️ '{self.msg_id}' е спряно.", ephemeral=True)
+
+    async def delete_callback(self, interaction: discord.Interaction):
+        if not has_permission(interaction.user):
+            await interaction.response.send_message("🚫 Нямаш права за тази операция.", ephemeral=True)
+            return
+        msg = active_messages.pop(self.msg_id, None)
+        if msg:
+            task = msg.get("task")
+            if task:
+                task.cancel()
+            channel = bot.get_channel(CHANNEL_ID)
+            embed_message_id = msg.get("embed_message_id")
+            if channel and embed_message_id:
+                try:
+                    embed_msg = await channel.fetch_message(embed_message_id)
+                    await embed_msg.delete()
+                except (discord.NotFound, discord.Forbidden):
+                    pass
+                except discord.HTTPException as error:
+                    print(f"❌ Неуспешно изтриване на embed за {self.msg_id}: {error}")
+            save_messages()
+            await interaction.response.send_message(f"❌ '{self.msg_id}' е изтрито.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Не е намерено.", ephemeral=True)
+
+    async def edit_callback(self, interaction: discord.Interaction):
+        if not has_edit_permission(interaction.user):
+            await interaction.response.send_message("🚫 Нямаш права да редактираш съобщения.", ephemeral=True)
+            return
+        msg = active_messages.get(self.msg_id)
+        if not msg:
+            await interaction.response.send_message("❌ Не е намерено.", ephemeral=True)
+            return
+        view = EditSelectView(self.msg_id)
+        await interaction.response.send_message("Какво искаш да редактираш?", view=view, ephemeral=True)
 
 # === Команди ===
 @bot.event
@@ -266,8 +346,6 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
     save_messages()
     await restart_message_task(id)
     await update_embed_status(msg_id=id, interaction=interaction)
-
-# … (останалите команди и модали остават без промяна) …
 
 # === Стартиране на бота ===
 bot.run(TOKEN)
