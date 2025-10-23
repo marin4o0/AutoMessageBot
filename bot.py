@@ -256,7 +256,7 @@ class EditSelectView(discord.ui.View):
         super().__init__(timeout=120)
         self.add_item(EditSelect(msg_id))
 
-# === Modals за съдържание, интервал, repeat и канал ===
+# === Modals за съдържание, интервал, repeat и канал (епhemeral) ===
 class ContentEditModal(discord.ui.Modal):
     def __init__(self, msg_id: str):
         super().__init__(title="Edit Message Content")
@@ -271,20 +271,59 @@ class ContentEditModal(discord.ui.Modal):
             await restart_message_task(self.msg_id, start_immediately=False)
         await interaction.response.send_message("✅ Съобщението беше обновено.", ephemeral=True)
 
-# IntervalEditModal, RepeatEditModal и ChannelSelectView се създават по същия принцип с ephemeral=True
-# --- могат да бъдат копирани и адаптирани от ContentEditModal ---
+class IntervalEditModal(discord.ui.Modal):
+    def __init__(self, msg_id: str):
+        super().__init__(title="Edit Interval")
+        self.msg_id = msg_id
+        self.new_interval = discord.ui.TextInput(label="Interval (minutes)", default=str(get_stored_interval(msg_id) or 0))
+        self.add_item(self.new_interval)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        update_interval_value(self.msg_id, int(self.new_interval.value))
+        msg = active_messages.get(self.msg_id)
+        if msg.get("status") == "active":
+            await restart_message_task(self.msg_id, start_immediately=False)
+        await interaction.response.send_message("✅ Интервалът беше обновен.", ephemeral=True)
+
+class RepeatEditModal(discord.ui.Modal):
+    def __init__(self, msg_id: str):
+        super().__init__(title="Edit Repeat Count")
+        self.msg_id = msg_id
+        self.new_repeat = discord.ui.TextInput(label="Repeat count (0=∞)", default=str(get_stored_repeat(msg_id) or 0))
+        self.add_item(self.new_repeat)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        update_repeat_value(self.msg_id, int(self.new_repeat.value))
+        msg = active_messages.get(self.msg_id)
+        if msg.get("status") == "active":
+            await restart_message_task(self.msg_id, start_immediately=False)
+        await interaction.response.send_message("✅ Повторенията бяха обновени.", ephemeral=True)
+
+class ChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, msg_id: str):
+        super().__init__(custom_id=f"channel_select_{msg_id}", placeholder="Избери текстов канал", channel_types=[discord.ChannelType.text])
+        self.msg_id = msg_id
+
+    async def callback(self, interaction: discord.Interaction):
+        update_channel_value(self.msg_id, self.values[0].id)
+        msg = active_messages.get(self.msg_id)
+        if msg.get("status") == "active":
+            await restart_message_task(self.msg_id, start_immediately=False)
+        await interaction.response.send_message(f"✅ Каналът беше обновен.", ephemeral=True)
+
+class ChannelSelectView(discord.ui.View):
+    def __init__(self, msg_id: str):
+        super().__init__(timeout=120)
+        self.add_item(ChannelSelect(msg_id))
 
 # === Команди ===
 @bot.event
 async def on_ready():
     print(f"✅ Влязъл съм като {bot.user}")
-    try:
-        if guild:
-            await tree.sync(guild=guild)
-        else:
-            await tree.sync()
-    except Exception as e:
-        print(f"❌ Грешка при синхронизиране: {e}")
+    if guild:
+        await tree.sync(guild=guild)
+    else:
+        await tree.sync()
     await load_messages()
 
 @tree.command(name="create", description="Създай автоматично съобщение.")
