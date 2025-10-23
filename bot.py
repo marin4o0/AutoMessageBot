@@ -49,6 +49,54 @@ def save_messages():
     with open(SAVE_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
+def get_message_data(msg_id: str) -> Optional[dict]:
+    return active_messages.get(msg_id)
+
+def get_stored_message_content(msg_id: str) -> str:
+    data = get_message_data(msg_id)
+    return data.get("message", "") if data else ""
+
+def get_stored_interval(msg_id: str) -> Optional[int]:
+    data = get_message_data(msg_id)
+    return data.get("interval") if data else None
+
+def get_stored_repeat(msg_id: str) -> Optional[int]:
+    data = get_message_data(msg_id)
+    return data.get("repeat") if data else None
+
+def get_stored_channel_id(msg_id: str) -> Optional[int]:
+    data = get_message_data(msg_id)
+    return data.get("channel_id") if data else None
+
+def update_message_content_value(msg_id: str, new_content: str) -> None:
+    data = get_message_data(msg_id)
+    if not data:
+        raise KeyError(msg_id)
+    data["message"] = new_content
+    save_messages()
+
+def update_interval_value(msg_id: str, new_interval: int) -> None:
+    data = get_message_data(msg_id)
+    if not data:
+        raise KeyError(msg_id)
+    data["interval"] = new_interval
+    save_messages()
+
+def update_repeat_value(msg_id: str, new_repeat: int) -> None:
+    data = get_message_data(msg_id)
+    if not data:
+        raise KeyError(msg_id)
+    data["repeat"] = new_repeat
+    save_messages()
+
+def update_channel_value(msg_id: str, new_channel_id: Optional[int]) -> None:
+    data = get_message_data(msg_id)
+    if not data:
+        raise KeyError(msg_id)
+    data["channel_id"] = new_channel_id
+    save_messages()
+
+# === Task за автоматични съобщения ===
 async def restart_message_task(msg_id: str, start_immediately: bool = True):
     msg_data = active_messages.get(msg_id)
     if not msg_data:
@@ -138,51 +186,56 @@ def build_info_embed(msg_data: dict) -> discord.Embed:
     embed.timestamp = datetime.utcnow()
     return embed
 
-# === Views и бутони ===
-class MessageButtons(discord.ui.View):
-    def __init__(self, msg_id):
-        super().__init__(timeout=None)
+# === Edit modal и channel select ===
+class EditModal(discord.ui.Modal):
+    def __init__(self, msg_id: str):
+        super().__init__(title="Edit Message")
+        self.msg_id = msg_id
+        self.content_input = discord.ui.TextInput(label="Message", default=get_stored_message_content(msg_id)[:1900])
+        self.interval_input = discord.ui.TextInput(label="Interval (minutes)", default=str(get_stored_interval(msg_id) or 0))
+        self.repeat_input = discord.ui.TextInput(label="Repeat count (0=∞)", default=str(get_stored_repeat(msg_id) or 0))
+        self.add_item(self.content_input)
+        self.add_item(self.interval_input)
+        self.add_item(self.repeat_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        update_message_content_value(self.msg_id, self.content_input.value)
+        update_interval_value(self.msg_id, int(self.interval_input.value))
+        update_repeat_value(self.msg_id, int(self.repeat_input.value))
+        await interaction.response.send_message("✅ Съобщението беше обновено.", ephemeral=True)
+
+class ChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, msg_id: str):
+        super().__init__(custom_id=f"channel_select_{msg_id}", placeholder="Избери текстов канал", channel_types=[discord.ChannelType.text])
         self.msg_id = msg_id
 
-    @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.green)
-    async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        msg = active_messages.get(self.msg_id)
-        if not msg:
-            await interaction.response.send_message("❌ Съобщението не съществува.", ephemeral=True)
-            return
-        if not has_permission(interaction.user):
-            await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
-            return
-        if msg["status"] == "active":
-            await interaction.response.send_message("⚠️ Вече е активно.", ephemeral=True)
-            return
-        msg["status"] = "active"
-        await restart_message_task(self.msg_id)
-        await interaction.response.send_message(f"▶️ '{self.msg_id}' стартирано.", ephemeral=True)
+    async def callback(self, interaction: discord.Interaction):
+        update_channel_value(self.msg_id, self.values[0].id)
+        await interaction.response.send_message(f"✅ Каналът беше обновен.", ephemeral=True)
 
-    @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.blurple)
-    async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        msg = active_messages.get(self.msg_id)
-        if not msg:
-            await interaction.response.send_message("❌ Съобщението не съществува.", ephemeral=True)
-            return
-        if not has_permission(interaction.user):
-            await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
-            return
-        msg["status"] = "stopped"
-        task = msg.get("task")
-        if task:
-            task.cancel()
-        await interaction.response.send_message(f"⏹️ '{self.msg_id}' е спряно.", ephemeral=True)
+class EditView(discord.ui.View):
+    def __init__(self, msg_id: str):
+        super().__init__(timeout=120)
+        self.add_item(ChannelSelect(msg_id))
+        self.msg_id = msg_id
 
-    @discord.ui.button(emoji="❌", style=discord.ButtonStyle.gray)
-    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        msg = active_messages.pop(self.msg_id, None)
-        if msg and msg.get("task"):
-            msg["task"].cancel()
-        await interaction.response.send_message(f"❌ '{self.msg_id}' изтрито.", ephemeral=True)
+    @discord.ui.button(label="Edit All", style=discord.ButtonStyle.blurple)
+    async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(EditModal(self.msg_id))
 
-# === Commands /create и /list ===
+# === Full buttons with edit ===
+class FullMessageButtons(discord.ui.View):
+    def __init__(self, msg_id: str):
+        super().__init__(timeout=None)
+        self.msg_id = msg_id
+        # Add default buttons
+        self.add_item(discord.ui.Button(label="Start", style=discord.ButtonStyle.green, custom_id=f"start_{msg_id}"))
+        self.add_item(discord.ui.Button(label="Stop", style=discord.ButtonStyle.blurple, custom_id=f"stop_{msg_id}"))
+        self.add_item(discord.ui.Button(label="Delete", style=discord.ButtonStyle.red, custom_id=f"delete_{msg_id}"))
+        # Add edit view
+        self.add_item(EditView(msg_id))
+
+# === Commands /create and /list ===
 @tree.command(name="create", description="Създай ново автоматично съобщение.")
 @app_commands.describe(message="Текст на съобщението", interval="Интервал в минути", repeat="Брой повторения (0=∞)", id="Уникален идентификатор", channel="Канал за съобщението")
 async def create(interaction: discord.Interaction, message: str, interval: int, repeat: int, id: str, channel: Optional[discord.TextChannel] = None):
@@ -222,7 +275,7 @@ async def list_messages(interaction: discord.Interaction):
     await interaction.response.send_message("📋 Всички съобщения:", ephemeral=True)
     for msg in active_messages.values():
         embed = build_info_embed(msg)
-        await interaction.followup.send(embed=embed, view=MessageButtons(msg['id']), ephemeral=True)
+        await interaction.followup.send(embed=embed, view=FullMessageButtons(msg['id']), ephemeral=True)
 
 # === Стартиране на бота ===
 @bot.event
