@@ -99,6 +99,7 @@ def update_channel_value(msg_id: str, new_channel_id: Optional[int]) -> None:
     data["channel_id"] = new_channel_id
     save_messages()
 
+# === Task за автоматични съобщения ===
 async def restart_message_task(msg_id: str, start_immediately: bool = True):
     msg_data = active_messages.get(msg_id)
     if not msg_data:
@@ -195,48 +196,42 @@ def build_info_embed(msg_data: dict) -> discord.Embed:
     embed.timestamp = datetime.utcnow()
     return embed
 
-# === Views и Modals (същите както преди) ===
-# Класове: MessageButtons, EditSelect, EditSelectView, ContentEditModal, IntervalEditModal, RepeatEditModal, ChannelSelect, ChannelSelectView
-# --- остават същите с ephemeral=True ---
+# === Views и Buttons ===
+class MessageButtons(discord.ui.View):
+    def __init__(self, msg_id):
+        super().__init__(timeout=None)
+        self.msg_id = msg_id
 
-# === Команди ===
-@bot.event
-async def on_ready():
-    print(f"✅ Влязъл съм като {bot.user}")
-    if guild:
-        await tree.sync(guild=guild)
-    else:
-        await tree.sync()
-    await load_messages()
+    @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.green)
+    async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_permission(interaction.user):
+            await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
+            return
+        msg = active_messages.get(self.msg_id)
+        if msg["status"] == "active":
+            await interaction.response.send_message("⚠️ Вече е активно.", ephemeral=True)
+            return
+        msg["status"] = "active"
+        await interaction.response.send_message(f"▶️ '{self.msg_id}' стартирано.", ephemeral=True)
 
-@tree.command(name="create", description="Създай автоматично съобщение.")
-@app_commands.describe(message="Текст", interval="Интервал", repeat="Повторения", id="Идентификатор", channel="Канал")
-async def create(interaction: discord.Interaction, message: str, interval: int, repeat: int, id: str, channel: Optional[discord.TextChannel] = None):
-    if not has_permission(interaction.user):
-        await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
-        return
-    if id in active_messages:
-        await interaction.response.send_message(f"⚠️ '{id}' вече съществува.", ephemeral=True)
-        return
-    channel_id_for_task = channel.id if channel else (CHANNEL_ID if CHANNEL_ID else None)
-    if channel_id_for_task is None:
-        await interaction.response.send_message("❌ Няма канал.", ephemeral=True)
-        return
-    msg_data = {
-        "task": None,
-        "message": message,
-        "interval": interval,
-        "repeat": repeat,
-        "id": id,
-        "creator": interaction.user.name,
-        "status": "active",
-        "channel_id": channel_id_for_task
-    }
-    active_messages[id] = msg_data
-    save_messages()
-    await restart_message_task(id, start_immediately=True)
-    await interaction.response.send_message(f"✅ Създадено съобщение '{id}'.", ephemeral=True)
+    @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.blurple)
+    async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_permission(interaction.user):
+            await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
+            return
+        msg = active_messages.get(self.msg_id)
+        msg["status"] = "stopped"
+        await interaction.response.send_message(f"⏹️ '{self.msg_id}' е спряно.", ephemeral=True)
 
+    @discord.ui.button(emoji="❌", style=discord.ButtonStyle.gray)
+    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_permission(interaction.user):
+            await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
+            return
+        active_messages.pop(self.msg_id, None)
+        await interaction.response.send_message(f"❌ '{self.msg_id}' изтрито.", ephemeral=True)
+
+# === Command /list ===
 @tree.command(name="list", description="Покажи всички съобщения с бутони.")
 async def list_messages(interaction: discord.Interaction):
     if not has_permission(interaction.user):
