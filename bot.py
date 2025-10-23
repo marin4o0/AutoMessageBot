@@ -52,134 +52,7 @@ def save_messages():
     with open(SAVE_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-def get_message_data(msg_id: str) -> Optional[dict]:
-    return active_messages.get(msg_id)
-
-def get_stored_message_content(msg_id: str) -> str:
-    data = get_message_data(msg_id)
-    return data.get("message", "") if data else ""
-
-def get_stored_interval(msg_id: str) -> Optional[int]:
-    data = get_message_data(msg_id)
-    return data.get("interval") if data else None
-
-def get_stored_repeat(msg_id: str) -> Optional[int]:
-    data = get_message_data(msg_id)
-    return data.get("repeat") if data else None
-
-def get_stored_channel_id(msg_id: str) -> Optional[int]:
-    data = get_message_data(msg_id)
-    return data.get("channel_id") if data else None
-
-def update_message_content_value(msg_id: str, new_content: str) -> None:
-    data = get_message_data(msg_id)
-    if not data:
-        raise KeyError(msg_id)
-    data["message"] = new_content
-    save_messages()
-
-def update_interval_value(msg_id: str, new_interval: int) -> None:
-    data = get_message_data(msg_id)
-    if not data:
-        raise KeyError(msg_id)
-    data["interval"] = new_interval
-    save_messages()
-
-def update_repeat_value(msg_id: str, new_repeat: int) -> None:
-    data = get_message_data(msg_id)
-    if not data:
-        raise KeyError(msg_id)
-    data["repeat"] = new_repeat
-    save_messages()
-
-def update_channel_value(msg_id: str, new_channel_id: Optional[int]) -> None:
-    data = get_message_data(msg_id)
-    if not data:
-        raise KeyError(msg_id)
-    data["channel_id"] = new_channel_id
-    save_messages()
-
-# === Task за автоматични съобщения ===
-async def restart_message_task(msg_id: str, start_immediately: bool = True):
-    msg_data = active_messages.get(msg_id)
-    if not msg_data:
-        return
-
-    existing_task = msg_data.get("task")
-    if existing_task:
-        existing_task.cancel()
-
-    if msg_data.get("status") != "active":
-        msg_data["task"] = None
-        return
-
-    target_channel_id = msg_data.get("channel_id") or CHANNEL_ID
-    channel = bot.get_channel(target_channel_id) if target_channel_id else None
-    if not channel:
-        print(f"⚠️ Каналът с ID {target_channel_id} не е намерен за задача {msg_id}.")
-        msg_data["status"] = "stopped"
-        msg_data["task"] = None
-        save_messages()
-        return
-
-    async def task_func():
-        count = 0
-        completed_naturally = False
-        try:
-            interval_minutes = msg_data.get("interval", 0)
-            if not start_immediately and interval_minutes > 0:
-                try:
-                    await asyncio.sleep(interval_minutes * 60)
-                except asyncio.CancelledError:
-                    raise
-
-            while True:
-                if msg_data.get("repeat", 0) != 0 and count >= msg_data.get("repeat", 0):
-                    completed_naturally = True
-                    break
-
-                try:
-                    await channel.send(msg_data.get("message", ""))
-                except discord.Forbidden:
-                    print(f"❌ Нямам права да пусна съобщение в канал {target_channel_id}.")
-                    completed_naturally = True
-                    break
-                except Exception as e:
-                    print(f"❌ Грешка при пращане на съобщение ({msg_id}): {e}")
-
-                count += 1
-                if interval_minutes <= 0:
-                    completed_naturally = True
-                    break
-
-                try:
-                    await asyncio.sleep(interval_minutes * 60)
-                except asyncio.CancelledError:
-                    raise
-        except asyncio.CancelledError:
-            pass
-        finally:
-            current_data = active_messages.get(msg_id)
-            if current_data:
-                current_data["task"] = None
-                if completed_naturally:
-                    current_data["status"] = "stopped"
-                    save_messages()
-
-    msg_data["task"] = asyncio.create_task(task_func())
-    save_messages()
-
-async def load_messages():
-    if not os.path.exists(SAVE_FILE):
-        return
-    with open(SAVE_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    for msg_id, msg in data.items():
-        active_messages[msg_id] = msg
-        active_messages[msg_id]["task"] = None
-        await restart_message_task(msg_id, start_immediately=True)
-
-# === Embed Helper за пълна информация ===
+# === Helpers за embed ===
 def build_info_embed(msg_data: dict) -> discord.Embed:
     status = msg_data.get("status", "unknown")
     color = discord.Color.green() if status == "active" else discord.Color.red()
@@ -196,7 +69,7 @@ def build_info_embed(msg_data: dict) -> discord.Embed:
     embed.timestamp = datetime.utcnow()
     return embed
 
-# === Views и Buttons ===
+# === Views и модали ===
 class MessageButtons(discord.ui.View):
     def __init__(self, msg_id):
         super().__init__(timeout=None)
@@ -231,7 +104,55 @@ class MessageButtons(discord.ui.View):
         active_messages.pop(self.msg_id, None)
         await interaction.response.send_message(f"❌ '{self.msg_id}' изтрито.", ephemeral=True)
 
-# === Command /list ===
+# Модали за edit
+class ContentEditModal(discord.ui.Modal):
+    def __init__(self, msg_id: str):
+        super().__init__(title="Edit Message Content")
+        self.msg_id = msg_id
+        self.new_content = discord.ui.TextInput(label="New Message Content", default=get_stored_message_content(msg_id)[:1900])
+        self.add_item(self.new_content)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        update_message_content_value(self.msg_id, self.new_content.value)
+        await interaction.response.send_message("✅ Съобщението беше обновено.", ephemeral=True)
+
+class IntervalEditModal(discord.ui.Modal):
+    def __init__(self, msg_id: str):
+        super().__init__(title="Edit Interval")
+        self.msg_id = msg_id
+        self.new_interval = discord.ui.TextInput(label="Interval (minutes)", default=str(get_stored_interval(msg_id) or 0))
+        self.add_item(self.new_interval)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        update_interval_value(self.msg_id, int(self.new_interval.value))
+        await interaction.response.send_message("✅ Интервалът беше обновен.", ephemeral=True)
+
+class RepeatEditModal(discord.ui.Modal):
+    def __init__(self, msg_id: str):
+        super().__init__(title="Edit Repeat Count")
+        self.msg_id = msg_id
+        self.new_repeat = discord.ui.TextInput(label="Repeat count (0=∞)", default=str(get_stored_repeat(msg_id) or 0))
+        self.add_item(self.new_repeat)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        update_repeat_value(self.msg_id, int(self.new_repeat.value))
+        await interaction.response.send_message("✅ Повторенията бяха обновени.", ephemeral=True)
+
+class ChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, msg_id: str):
+        super().__init__(custom_id=f"channel_select_{msg_id}", placeholder="Избери текстов канал", channel_types=[discord.ChannelType.text])
+        self.msg_id = msg_id
+
+    async def callback(self, interaction: discord.Interaction):
+        update_channel_value(self.msg_id, self.values[0].id)
+        await interaction.response.send_message(f"✅ Каналът беше обновен.", ephemeral=True)
+
+class ChannelSelectView(discord.ui.View):
+    def __init__(self, msg_id: str):
+        super().__init__(timeout=120)
+        self.add_item(ChannelSelect(msg_id))
+
+# === Команди ===
 @tree.command(name="list", description="Покажи всички съобщения с бутони.")
 async def list_messages(interaction: discord.Interaction):
     if not has_permission(interaction.user):
@@ -246,6 +167,15 @@ async def list_messages(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed, view=MessageButtons(msg['id']), ephemeral=True)
 
 # === Стартиране на бота ===
+@bot.event
+async def on_ready():
+    print(f"✅ Влязъл съм като {bot.user}")
+    if guild:
+        await tree.sync(guild=guild)
+    else:
+        await tree.sync()
+    await load_messages()
+
 if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
