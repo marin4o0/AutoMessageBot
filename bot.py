@@ -237,7 +237,7 @@ def build_configuration_embed(msg_data: dict, show_channel_public: bool = False)
         # public embed: указваме, че каналът е скрит (видим само при edit)
         embed.add_field(name="Channel", value="🔒 (видимо само когато натиснеш Edit)", inline=False)
 
-    embed.set_timestamp()
+    embed.timestamp = datetime.utcnow()
     return embed
 
 def CHANNEL_id_or_none():
@@ -832,3 +832,4 @@ if not TOKEN:
     print("❌ Грешка: Не е зададен DISCORD_TOKEN като env променлива.")
 else:
     bot.run(TOKEN)
+
