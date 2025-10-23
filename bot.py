@@ -244,35 +244,36 @@ def build_configuration_embed(msg_data: dict, show_channel_public: bool = False)
 def CHANNEL_id_or_none():
     return CHANNEL_ID
 
-async def update_embed_status(msg_id):
+async def update_embed_status(msg_id, interaction: Optional[discord.Interaction] = None):
     msg_data = active_messages.get(msg_id)
     if not msg_data:
         return
 
-    # Публичния канал, в който публикуваме embed-ите със състоянието, е global CHANNEL_ID
-    channel = bot.get_channel(CHANNEL_ID) if CHANNEL_ID else None
-    if not channel:
-        print(f"⚠️ Нямам channel ({CHANNEL_ID}) за обновяване на embed за {msg_id}.")
-        return
-
-    embed = build_configuration_embed(msg_data, show_channel_public=False)
+    embed = build_configuration_embed(msg_data)
     view = MessageButtons(msg_id)
     embed_message_id = msg_data.get("embed_message_id")
 
     try:
-        if embed_message_id:
-            try:
-                embed_msg = await channel.fetch_message(embed_message_id)
-            except discord.NotFound:
-                embed_msg = await channel.send(embed=embed, view=view)
-                record_embed_message_id(msg_id, embed_msg.id)
-            else:
-                await embed_msg.edit(embed=embed, view=view)
+        if interaction:
+            # Ако имаме interaction, изпращаме ephemeral embed
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         else:
-            embed_msg = await channel.send(embed=embed, view=view)
-            record_embed_message_id(msg_id, embed_msg.id)
+            # Ако няма interaction, просто обновяваме съществуващ embed, без да го пращаме ново
+            channel = bot.get_channel(CHANNEL_ID)
+            if not channel:
+                print(f"⚠️ Каналът с ID {CHANNEL_ID} не е намерен за обновяване на {msg_id}.")
+                return
+
+            if embed_message_id:
+                try:
+                    embed_msg = await channel.fetch_message(embed_message_id)
+                except discord.NotFound:
+                    # не създаваме нов embed публично
+                    return
+                else:
+                    await embed_msg.edit(embed=embed, view=view)
     except discord.Forbidden:
-        print(f"❌ Нямам права да обновя embed за {msg_id} в канал {CHANNEL_ID}.")
+        print(f"❌ Нямам права да обновя embed за {msg_id}.")
     except discord.HTTPException as error:
         print(f"❌ Неуспешно обновяване на embed за {msg_id}: {error}")
 
@@ -746,7 +747,8 @@ async def on_ready():
     id="Уникален идентификатор",
     channel="Канал (по избор) - ако не е зададен, се ползва default"
 )
-async def create(interaction: discord.Interaction, message: str, interval: int, repeat: int, id: str, channel: Optional[discord.TextChannel] = None):
+@tree.command(name="create", description="Създай автоматично съобщение.")
+async def create(interaction: discord.Interaction, message: str, interval: int, repeat: int, id: str):
     if not has_permission(interaction.user):
         await interaction.response.send_message("🚫 Нямаш права да създаваш съобщения.", ephemeral=True)
         return
@@ -757,15 +759,6 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
         await interaction.response.send_message("❌ Интервалът трябва да е > 0.", ephemeral=True)
         return
 
-    # Определяме channel_id: ако командата подаде канал, използваме него
-    channel_id_for_task = channel.id if channel else (CHANNEL_ID if CHANNEL_ID else None)
-    if channel_id_for_task is None:
-        await interaction.response.send_message(
-            f"❌ Няма зададен default канал и не избра канал в командата.",
-            ephemeral=True
-        )
-        return
-
     msg_data = {
         "task": None,
         "message": message,
@@ -774,15 +767,14 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
         "id": id,
         "creator": interaction.user.name,
         "status": "active",
-        "embed_message_id": None,
-        "channel_id": channel_id_for_task
+        "embed_message_id": None
     }
     active_messages[id] = msg_data
     save_messages()
-    # При създаване - оставяме старото поведение: изпраща веднага
-    await restart_message_task(id, start_immediately=True)
-    await update_embed_status(id)
-    await interaction.response.send_message(f"✅ Създадено съобщение '{id}'.", ephemeral=True)
+    await restart_message_task(id)
+
+    # Показваме embed само ephemeral на създателя
+    await update_embed_status(msg_id=id, interaction=interaction)
 
 @tree.command(name="list", description="Покажи всички съобщения с бутони.")
 async def list_messages(interaction: discord.Interaction):
@@ -833,5 +825,6 @@ if not TOKEN:
     print("❌ Грешка: Не е зададен DISCORD_TOKEN като env променлива.")
 else:
     bot.run(TOKEN)
+
 
 
