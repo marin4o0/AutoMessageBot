@@ -186,7 +186,7 @@ def build_info_embed(msg_data: dict) -> discord.Embed:
     embed.timestamp = datetime.utcnow()
     return embed
 
-# === Edit modal и channel select ===
+# === Edit Modal и ChannelSelect ===
 class EditModal(discord.ui.Modal):
     def __init__(self, msg_id: str):
         super().__init__(title="Edit Message")
@@ -204,40 +204,40 @@ class EditModal(discord.ui.Modal):
         update_repeat_value(self.msg_id, int(self.repeat_input.value))
         await interaction.response.send_message("✅ Съобщението беше обновено.", ephemeral=True)
 
-class ChannelSelect(discord.ui.ChannelSelect):
+class ChannelSelect(discord.ui.Select):
     def __init__(self, msg_id: str):
-        super().__init__(custom_id=f"channel_select_{msg_id}", placeholder="Избери текстов канал", channel_types=[discord.ChannelType.text])
         self.msg_id = msg_id
+        options = []
+        for guild_channel in bot.get_all_channels():
+            if isinstance(guild_channel, discord.TextChannel):
+                options.append(discord.SelectOption(label=guild_channel.name, value=str(guild_channel.id)))
+        super().__init__(placeholder="Избери канал", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        update_channel_value(self.msg_id, self.values[0].id)
-        await interaction.response.send_message(f"✅ Каналът беше обновен.", ephemeral=True)
+        update_channel_value(self.msg_id, int(self.values[0]))
+        await interaction.response.send_message("✅ Каналът беше обновен.", ephemeral=True)
 
-class EditView(discord.ui.View):
-    def __init__(self, msg_id: str):
-        super().__init__(timeout=120)
-        self.add_item(ChannelSelect(msg_id))
-        self.msg_id = msg_id
-
-    @discord.ui.button(label="Edit All", style=discord.ButtonStyle.blurple)
-    async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(EditModal(self.msg_id))
-
-# === Full buttons with edit ===
+# === FullMessageButtons с Edit бутон ===
 class FullMessageButtons(discord.ui.View):
     def __init__(self, msg_id: str):
         super().__init__(timeout=None)
         self.msg_id = msg_id
-        # Add default buttons
+        # Старт, стоп и изтриване
         self.add_item(discord.ui.Button(label="Start", style=discord.ButtonStyle.green, custom_id=f"start_{msg_id}"))
         self.add_item(discord.ui.Button(label="Stop", style=discord.ButtonStyle.blurple, custom_id=f"stop_{msg_id}"))
         self.add_item(discord.ui.Button(label="Delete", style=discord.ButtonStyle.red, custom_id=f"delete_{msg_id}"))
-        # Add edit view
-        self.add_item(EditView(msg_id))
+        # Edit бутон
+        self.add_item(discord.ui.Button(label="Edit", style=discord.ButtonStyle.blurple, custom_id=f"edit_{msg_id}"))
 
 # === Commands /create and /list ===
 @tree.command(name="create", description="Създай ново автоматично съобщение.")
-@app_commands.describe(message="Текст на съобщението", interval="Интервал в минути", repeat="Брой повторения (0=∞)", id="Уникален идентификатор", channel="Канал за съобщението")
+@app_commands.describe(
+    message="Текст на съобщението",
+    interval="Интервал в минути",
+    repeat="Брой повторения (0=∞)",
+    id="Уникален идентификатор",
+    channel="Канал за съобщението"
+)
 async def create(interaction: discord.Interaction, message: str, interval: int, repeat: int, id: str, channel: Optional[discord.TextChannel] = None):
     if not has_permission(interaction.user):
         await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
