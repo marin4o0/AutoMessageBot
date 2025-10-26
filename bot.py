@@ -102,7 +102,10 @@ async def restart_message_task(msg_id: str, start_immediately: bool = True):
         return
 
     if msg_data.get("task"):
-        msg_data["task"].cancel()
+        try:
+            msg_data["task"].cancel()
+        except Exception:
+            pass
 
     if msg_data.get("status") != "active":
         msg_data["task"] = None
@@ -259,7 +262,10 @@ class FullMessageButtons(discord.ui.View):
         msg["status"] = "stopped"
         task = msg.get("task")
         if task:
-            task.cancel()
+            try:
+                task.cancel()
+            except Exception:
+                pass
         save_messages()
         await interaction.response.send_message(f"⏸️ '{self.msg_id}' е спряно.", ephemeral=True)
 
@@ -270,7 +276,10 @@ class FullMessageButtons(discord.ui.View):
             return
         msg = active_messages.pop(self.msg_id, None)
         if msg and msg.get("task"):
-            msg["task"].cancel()
+            try:
+                msg["task"].cancel()
+            except Exception:
+                pass
         save_messages()
         await interaction.response.send_message(f"🗑️ '{self.msg_id}' изтрито.", ephemeral=True)
 
@@ -280,8 +289,6 @@ class FullMessageButtons(discord.ui.View):
             await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
             return
         await interaction.response.send_modal(EditModal(self.msg_id, self.guild))
-
-
 # === Commands ===
 @tree.command(name="create", description="Създай ново автоматично съобщение.")
 @app_commands.describe(
@@ -301,7 +308,7 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
 
     channel_id_for_task = channel.id if channel else (CHANNEL_ID if CHANNEL_ID else None)
     if not channel_id_for_task:
-        await interaction.response.send_message("❌ Не е зададен канал.", ephemeral=True)
+        await interaction.response.send_message("❌ Не е зададен канал. Можете да подадете канал като параметър или да зададете CHANNEL_ID в env.", ephemeral=True)
         return
 
     msg_data = {
@@ -330,23 +337,115 @@ async def list_messages(interaction: discord.Interaction):
         await interaction.response.send_message("ℹ️ Няма съобщения.", ephemeral=True)
         return
 
-    await interaction.response.send_message("📋 Всички активни съобщения:", ephemeral=True)
+    # Пращаме първо едно кратко епhemeral съобщение, след това followup-ите с embed-ите
+    await interaction.response.send_message("📋 Всички автоматични съобщения:", ephemeral=True)
     for msg in active_messages.values():
         embed = build_info_embed(msg)
-        await interaction.followup.send(embed=embed, view=FullMessageButtons(msg['id'], interaction.guild), ephemeral=True)
+        # followup.send - използваме try/except в случай че followup не може да бъде изпълнен
+        try:
+            await interaction.followup.send(embed=embed, view=FullMessageButtons(msg['id'], interaction.guild), ephemeral=True)
+        except Exception as e:
+            print(f"❌ Не успя да се изпрати followup за {msg.get('id')}: {e}")
+
+
+# === HELP команда (пълна документация и как да копирате Channel ID) ===
+@tree.command(name="help", description="Показва помощ и информация за командите.")
+@app_commands.describe(command="(по избор) име на команда за подробна справка")
+async def help_command(interaction: discord.Interaction, command: Optional[str] = None):
+    # Няма нужда от права — позволяваме на всички да видят помощта
+    # Ако е подадено конкретно име, показваме детайли, иначе общ преглед
+    commands_info = {
+        "create": {
+            "description": "Създава ново автоматично съобщение.",
+            "usage": "/create message:<текст> interval:<минути> repeat:<брой (0=∞)> id:<уникално> [channel:<канал>]",
+            "example": "/create message:Здравей! interval:60 repeat:0 id:morning channel:#announcements"
+        },
+        "list": {
+            "description": "Показва всички автоматични съобщения и бутони за управление.",
+            "usage": "/list",
+            "example": "/list"
+        },
+        "help": {
+            "description": "Показва справка за командите.",
+            "usage": "/help [command]",
+            "example": "/help create"
+        }
+    }
+
+    if command:
+        cmd = command.lower()
+        info = commands_info.get(cmd)
+        if not info:
+            await interaction.response.send_message(f"⚠️ Не разбирам команда '{command}'. Вижте /help за налични команди.", ephemeral=True)
+            return
+        embed = discord.Embed(title=f"/{cmd} — помощ", color=discord.Color.blue())
+        embed.add_field(name="Описание", value=info["description"], inline=False)
+        embed.add_field(name="Употреба", value=info["usage"], inline=False)
+        embed.add_field(name="Пример", value=info["example"], inline=False)
+        # Добавяме кратък блок с как да копирате Channel ID
+        embed.add_field(
+            name="Как да копирате Channel ID (Discord)",
+            value=(
+                "1) Отидете в Settings > Advanced и включете **Developer Mode**.\n"
+                "2) Отидете на желания канал, натиснете десен бутон върху името му.\n"
+                "3) Изберете **Copy ID** — това е числото, което можете да подадете като `channel`.\n\n"
+                "Можете да подадете канал като mention (напр. #announcements) или директно като ID (напр. 123456789012345678)."
+            ),
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    # Общ преглед
+    embed = discord.Embed(title="Помощ — Команди", color=discord.Color.blue())
+    for name, info in commands_info.items():
+        embed.add_field(name=f"/{name}", value=f"{info['description']}\n`Usage:` {info['usage']}", inline=False)
+    embed.set_footer(text="За детайли напишете /help <command>. За копиране на Channel ID — вижте детайлите при конкретна команда.")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+# === Обработчик за грешки на app commands (предотвратява големи tracebacks като CommandNotFound) ===
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    # CommandNotFound се появява когато interaction съдържа команда, която вече не е регистрирана (cache / старо)
+    if isinstance(error, app_commands.CommandNotFound):
+        # кратко уведомление — не печатаме голям traceback
+        try:
+            await interaction.response.send_message("⚠️ Командата не е намерена (възможно е да е била премахната/променена). Опитайте да отворите менюто на slash командите отново.", ephemeral=True)
+        except Exception:
+            pass
+        return
+
+    # За останалите app command грешки — логваме и връщаме общо съобщение
+    print(f"Unhandled app command error: {error}")
+    try:
+        await interaction.response.send_message("❌ Възникна грешка при изпълнение на командата.", ephemeral=True)
+    except Exception:
+        pass
 
 
 # === Стартиране на бота ===
 @bot.event
 async def on_ready():
     print(f"✅ Влязъл съм като {bot.user}")
-    if guild:
-        await tree.sync(guild=guild)
-        print(f"🔁 Slash командите са синхронизирани с guild {guild.id}")
-    else:
-        await tree.sync()
-        print("🌍 Slash командите са синхронизирани глобално.")
-    await load_messages()
+    try:
+        if guild:
+            # Ако е даден GUILD_ID — синхронизиране само за него (по-бързо и безопасно при разработка)
+            await tree.sync(guild=guild)
+            print(f"🔁 Slash командите са синхронизирани с guild {guild.id}")
+        else:
+            await tree.sync()
+            print("🌍 Slash командите са синхронизирани глобално.")
+    except Exception as e:
+        # Ако синхронизиране се провали — покажи грешка, но продължи
+        print(f"❌ Грешка при синхронизиране на slash командите: {e}")
+
+    # Зареждаме запазените задачи
+    try:
+        await load_messages()
+    except Exception as e:
+        print(f"❌ Грешка при load_messages: {e}")
+
 
 if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
