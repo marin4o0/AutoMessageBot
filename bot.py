@@ -438,7 +438,6 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     except Exception:
         pass
 
-
 # === On_ready и пост-старт задачи ===
 @bot.event
 async def on_ready():
@@ -447,41 +446,39 @@ async def on_ready():
     async def post_start_tasks():
         await asyncio.sleep(2)
 
-        # --- 1) Зареждане и рестартиране на активните съобщения ---
+        # --- Зареждане на активните съобщения ---
         try:
             await load_messages()
             print("💬 Заредени са активните съобщения и задачите са рестартирани.", flush=True)
         except Exception as e:
             print(f"❌ Грешка при load_messages: {e}", flush=True)
 
-        # --- 2) Синхронизация на командите ---
+        # --- Синхронизация на командите за guild ---
         try:
             if guild:
                 await tree.sync(guild=guild)
                 print(f"🔁 Slash командите са синхронизирани локално за guild {GUILD_ID}", flush=True)
+                await asyncio.sleep(1)  # кратко изчакване за обновяване
             else:
-                await tree.sync()
-                print("🌍 Slash командите са синхронизирани глобално.", flush=True)
+                print("⚠️ Няма зададен guild, синхронизацията е пропусната", flush=True)
         except Exception as e:
             print(f"⚠️ Грешка при синхронизация: {e}", flush=True)
 
-        # --- 3) Лог на регистрираните команди ---
+        # --- Лог на регистрираните команди ---
         try:
-            cmds = await tree.fetch_commands(guild=guild) if guild else await tree.fetch_commands()
+            cmds = await tree.fetch_commands(guild=guild) if guild else []
             print("📋 Списък с регистрирани команди:")
             for c in cmds:
                 print(f"- {c.name} ({c.id})")
         except Exception as e:
-            print(f"⚠️ Грешка при fetch на командите: {e}")
+            print(f"⚠️ Грешка при fetch на командите: {e}", flush=True)
 
         print("✅ post_start_tasks() приключи.", flush=True)
 
     asyncio.create_task(post_start_tasks())
-
 
 # === Стартиране на бота ===
 if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
-
