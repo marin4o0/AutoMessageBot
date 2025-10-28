@@ -402,18 +402,24 @@ async def on_ready():
 
     async def post_start_tasks():
         await asyncio.sleep(2)  # кратко изчакване
-        
-        if guild:
-    await tree.sync(guild=guild)
-else:
-    await tree.sync()
-
+  
         # --- 1) Зареждане и рестартиране на активните съобщения ---
         try:
             await load_messages()
             print("💬 Заредени са активните съобщения и задачите са рестартирани.", flush=True)
         except Exception as e:
             print(f"❌ Грешка при load_messages: {e}", flush=True)
+
+         # --- 1) Синхронизация на локалните команди за guild ---
+        try:
+            if guild:
+                await tree.sync(guild=guild)
+                print(f"🔁 Slash командите са синхронизирани локално за guild {GUILD_ID}", flush=True)
+            else:
+                await tree.sync()
+                print("🌍 Slash командите са синхронизирани глобално.", flush=True)
+        except Exception as e:
+            print(f"⚠️ Грешка при синхронизация: {e}", flush=True)
 
         # --- 2) Премахване на старите глобални команди, ако има такива ---
         try:
@@ -425,18 +431,7 @@ else:
         except Exception as e:
             print(f"⚠️ Грешка при премахване на глобални команди: {e}", flush=True)
 
-        # --- 3) Синхронизация на локалните команди за guild ---
-        try:
-            if guild:
-                await tree.sync(guild=guild)
-                print(f"🔁 Slash командите са синхронизирани локално за guild {GUILD_ID}", flush=True)
-            else:
-                await tree.sync()
-                print("🌍 Slash командите са синхронизирани глобално.", flush=True)
-        except Exception as e:
-            print(f"⚠️ Грешка при синхронизация: {e}", flush=True)
-
-        # --- 4) Обновяване на локалния кеш за мигновено autocomplete ---
+        # --- 3) Обновяване на локалния кеш за мигновено autocomplete ---
         try:
             if guild:
                 for name, cmd in tree._guild_commands.get(guild.id, {}).items():
@@ -445,7 +440,7 @@ else:
         except Exception as e:
             print(f"⚠️ Грешка при обновяване на локалния кеш: {e}", flush=True)
 
-        # --- 5) Лог на регистрираните команди ---
+        # --- 4) Лог на регистрираните команди ---
         try:
             cmds = await tree.fetch_commands(guild=guild) if guild else await tree.fetch_commands()
             print("📋 Списък с регистрирани команди:")
@@ -463,6 +458,7 @@ if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
+
 
 
 
