@@ -394,16 +394,6 @@ async def help_command(interaction: discord.Interaction, command: Optional[str] 
     embed.set_footer(text="За детайли напишете /help <command>.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
-# === Синхронизация веднага след дефиниция на командите ===
-if guild:
-    asyncio.run(tree.sync(guild=guild))
-    print(f"🔁 Slash командите са синхронизирани локално за guild {GUILD_ID}")
-else:
-    asyncio.run(tree.sync())
-    print("🌍 Slash командите са синхронизирани глобално")
-
-
 # === On_ready и пост-старт задачи ===
 @bot.event
 async def on_ready():
@@ -448,3 +438,4 @@ if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
+
