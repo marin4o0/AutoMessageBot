@@ -437,47 +437,41 @@ async def on_ready():
 
     async def post_start_tasks():
         print("⏳ post_start_tasks() стартира...", flush=True)
-        await asyncio.sleep(5)  # изчакваме Discord да е готов
+        await asyncio.sleep(2)  # кратко изчакване, Discord да е готов
 
-        # 1) Зареждане на активните съобщения
+        # --- Премахване на всички стари команди (глобални и локални) ---
         try:
-            await load_messages()
-            print("💬 Заредени са активните съобщения и задачите са рестартирани.", flush=True)
-        except Exception as e:
-            print(f"❌ Грешка при load_messages: {e}", flush=True)
+            # Вземаме всички команди (глобални)
+            global_cmds = await tree.fetch_commands()
+            for cmd in global_cmds:
+                try:
+                    await tree.remove_command(cmd.name)
+                    print(f"🧹 Премахната глобална команда: /{cmd.name}", flush=True)
+                except Exception as e:
+                    print(f"⚠️ Неуспешно премахване на глобална команда /{cmd.name}: {e}", flush=True)
 
-        # 2) Премахване на всички стари команди за guild (за мигновена синхронизация)
-        if guild:  # използваме локална синхронизация
-            try:
-                existing = await tree.fetch_commands(guild=guild)
-                for cmd in existing:
-                    if cmd.name not in ["create", "list", "help"]:
-                        try:
-                            await tree.remove_command(cmd.name, guild=guild)
-                            print(f"🧹 Премахната стара команда: /{cmd.name}", flush=True)
-                        except Exception as inner:
-                            print(f"⚠️ Неуспешно премахване на /{cmd.name}: {inner}", flush=True)
+            # Вземаме всички команди за guild (локални)
+            if guild:
+                guild_cmds = await tree.fetch_commands(guild=guild)
+                for cmd in guild_cmds:
+                    try:
+                        await tree.remove_command(cmd.name, guild=guild)
+                        print(f"🧹 Премахната локална команда: /{cmd.name}", flush=True)
+                    except Exception as e:
+                        print(f"⚠️ Неуспешно премахване на локална команда /{cmd.name}: {e}", flush=True)
 
+            print("✅ Всички стари команди са премахнати.", flush=True)
+
+            # --- Синхронизация на командите локално за guild ---
+            if guild:
                 await tree.sync(guild=guild)
-                print(f"🔁 Slash командите са синхронизирани за guild {guild.id} (локално, мигновено)", flush=True)
-            except Exception as e:
-                print(f"⚠️ Грешка при изчистване/синхронизиране на команди: {e}", flush=True)
-        else:
-            # fallback за глобална синхронизация (по-бавно)
-            try:
-                existing = await tree.fetch_commands()
-                for cmd in existing:
-                    if cmd.name not in ["create", "list", "help"]:
-                        try:
-                            await tree.remove_command(cmd.name)
-                            print(f"🧹 Премахната стара команда: /{cmd.name}", flush=True)
-                        except Exception as inner:
-                            print(f"⚠️ Неуспешно премахване на /{cmd.name}: {inner}", flush=True)
-
+                print(f"🔁 Slash командите са синхронизирани локално за guild {GUILD_ID}", flush=True)
+            else:
                 await tree.sync()
                 print("🌍 Slash командите са синхронизирани глобално.", flush=True)
-            except Exception as e:
-                print(f"⚠️ Грешка при глобално изчистване/синхронизиране: {e}", flush=True)
+
+        except Exception as e:
+            print(f"⚠️ Грешка при премахване/синхронизация на командите: {e}", flush=True)
 
         print("✅ post_start_tasks() приключи.", flush=True)
 
