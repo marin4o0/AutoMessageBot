@@ -13,6 +13,10 @@ CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID")) if os.getenv("DISCORD_CHANNEL_
 GUILD_ID = int(os.getenv("GUILD_ID")) if os.getenv("GUILD_ID") else None
 SAVE_FILE = "active_messages.json"
 ALLOWED_ROLES = ["Admin", "Moderator"]
+print("🔍 Проверка на Environment Variables:")
+print("DISCORD_TOKEN:", "✅ намерен" if TOKEN else "❌ липсва")
+print("GUILD_ID:", GUILD_ID)
+print("DISCORD_CHANNEL_ID:", CHANNEL_ID)
 
 # === Intents ===
 intents = discord.Intents.default()
@@ -479,3 +483,4 @@ async def on_ready():
         print(f"❌ Грешка при load_messages: {e}")
 
     print(f"✅ Влязъл съм като {bot.user}")
+
