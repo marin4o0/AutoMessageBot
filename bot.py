@@ -431,56 +431,61 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     except Exception:
         pass
 
-
 @bot.event
 async def on_ready():
     print(f"✅ Влязъл съм като {bot.user} (ботът е онлайн)", flush=True)
 
     async def post_start_tasks():
-        await asyncio.sleep(5)  # изчакваме Discord да е напълно готов
+        print("⏳ post_start_tasks() стартира...", flush=True)
+        await asyncio.sleep(5)  # изчакваме Discord да е готов
 
-        # === Изчистване на стари команди ===
-        try:
-            if guild:
-                existing = await tree.fetch_commands(guild=guild)
-            else:
-                existing = await tree.fetch_commands()
-
-            for cmd in existing:
-                if cmd.name not in ["create", "list", "help"]:
-                    print(f"🧹 Премахвам стара команда: /{cmd.name}", flush=True)
-                    try:
-                        if guild:
-                            await tree.remove_command(cmd.name, guild=guild)
-                        else:
-                            await tree.remove_command(cmd.name)
-                    except Exception as inner:
-                        print(f"⚠️ Неуспешно премахване на {cmd.name}: {inner}", flush=True)
-
-            if guild:
-                await tree.sync(guild=guild)
-                print(f"🔁 Slash командите са синхронизирани с guild {guild.id}", flush=True)
-            else:
-                await tree.sync()
-                print("🌍 Slash командите са синхронизирани глобално.", flush=True)
-        except Exception as e:
-            print(f"⚠️ Грешка при изчистване/синхронизиране на команди: {e}", flush=True)
-
-        # === Зареждане на съобщения ===
+        # 1) Зареждане на активните съобщения
         try:
             await load_messages()
             print("💬 Заредени са активните съобщения и задачите са рестартирани.", flush=True)
         except Exception as e:
             print(f"❌ Грешка при load_messages: {e}", flush=True)
 
-    # Стартираме пост-инициализационните задачи без да блокираме on_ready()
-    bot.loop.create_task(post_start_tasks())
+        # 2) Премахване на всички стари команди за guild (за мигновена синхронизация)
+        if guild:  # използваме локална синхронизация
+            try:
+                existing = await tree.fetch_commands(guild=guild)
+                for cmd in existing:
+                    if cmd.name not in ["create", "list", "help"]:
+                        try:
+                            await tree.remove_command(cmd.name, guild=guild)
+                            print(f"🧹 Премахната стара команда: /{cmd.name}", flush=True)
+                        except Exception as inner:
+                            print(f"⚠️ Неуспешно премахване на /{cmd.name}: {inner}", flush=True)
 
-    # === Стартиране на бота ===
+                await tree.sync(guild=guild)
+                print(f"🔁 Slash командите са синхронизирани за guild {guild.id} (локално, мигновено)", flush=True)
+            except Exception as e:
+                print(f"⚠️ Грешка при изчистване/синхронизиране на команди: {e}", flush=True)
+        else:
+            # fallback за глобална синхронизация (по-бавно)
+            try:
+                existing = await tree.fetch_commands()
+                for cmd in existing:
+                    if cmd.name not in ["create", "list", "help"]:
+                        try:
+                            await tree.remove_command(cmd.name)
+                            print(f"🧹 Премахната стара команда: /{cmd.name}", flush=True)
+                        except Exception as inner:
+                            print(f"⚠️ Неуспешно премахване на /{cmd.name}: {inner}", flush=True)
+
+                await tree.sync()
+                print("🌍 Slash командите са синхронизирани глобално.", flush=True)
+            except Exception as e:
+                print(f"⚠️ Грешка при глобално изчистване/синхронизиране: {e}", flush=True)
+
+        print("✅ post_start_tasks() приключи.", flush=True)
+
+    # Стартираме пост-старт задачите
+    asyncio.create_task(post_start_tasks())
+
+# === Стартиране на бота в края на файла ===
 if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
-
-
-
