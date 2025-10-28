@@ -428,6 +428,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 @bot.event
 async def on_ready():
     print(f"✅ Влязъл съм като {bot.user}")
+
     try:
         if guild:
             await tree.sync(guild=guild)
@@ -438,12 +439,7 @@ async def on_ready():
     except Exception as e:
         print(f"❌ Грешка при синхронизиране на slash командите: {e}")
 
-    try:
-        await load_messages()
-    except Exception as e:
-        print(f"❌ Грешка при load_messages: {e}")
-
-    # 👉 Изчистване на стари /help_create и други невалидни slash команди
+    # 🧹 Изчистване на стари /help_create и др.
     try:
         if guild:
             existing = await tree.fetch_commands(guild=guild)
@@ -463,3 +459,12 @@ async def on_ready():
             print("✅ Изчистени са стари глобални команди.")
     except Exception as e:
         print(f"⚠️ Грешка при изчистване на стари slash команди: {e}")
+
+    # ✅ Изчакваме малко преди да стартираме задачите, за да има време Discord API да подготви каналите
+    await asyncio.sleep(3)
+
+    try:
+        await load_messages()
+        print("💬 Заредени са активните съобщения и задачите са рестартирани.")
+    except Exception as e:
+        print(f"❌ Грешка при load_messages: {e}")
