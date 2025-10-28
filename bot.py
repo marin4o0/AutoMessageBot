@@ -375,6 +375,9 @@ async def help_command(interaction: discord.Interaction, command: Optional[str] 
             "example": "/help create"
         }
     }
+    print("DEBUG: /help е декларирана")
+for c in tree.walk_commands():
+    print(f"- {c.name}")
 
     if command:
         cmd = command.lower()
@@ -458,6 +461,7 @@ if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
+
 
 
 
