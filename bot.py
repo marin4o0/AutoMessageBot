@@ -235,6 +235,7 @@ class EditModal(discord.ui.Modal):
             await restart_message_task(self.msg_id, start_immediately=False)
 
         await interaction.response.send_message("✅ Съобщението беше обновено.", ephemeral=True)
+
 # === FullMessageButtons с callback функции ===
 class FullMessageButtons(discord.ui.View):
     def __init__(self, msg_id: str, guild: discord.Guild):
@@ -307,7 +308,14 @@ class FullMessageButtons(discord.ui.View):
     id="Уникален идентификатор",
     channel="Канал за съобщението"
 )
-async def create(interaction: discord.Interaction, message: str, interval: int, repeat: int, id: str, channel: Optional[discord.TextChannel] = None):
+async def create(
+    interaction: discord.Interaction,
+    message: str,
+    interval: int,
+    repeat: int,
+    id: str,
+    channel: Optional[discord.TextChannel] = None
+):
     if not has_permission(interaction.user):
         await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
         return
@@ -317,7 +325,10 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
 
     channel_id_for_task = channel.id if channel else (CHANNEL_ID if CHANNEL_ID else None)
     if not channel_id_for_task:
-        await interaction.response.send_message("❌ Не е зададен канал.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ Не е зададен канал. Можете да подадете канал като параметър или да зададете CHANNEL_ID в env.",
+            ephemeral=True
+        )
         return
 
     msg_data = {
@@ -350,7 +361,11 @@ async def list_messages(interaction: discord.Interaction):
     for msg in active_messages.values():
         embed = build_info_embed(msg)
         try:
-            await interaction.followup.send(embed=embed, view=FullMessageButtons(msg['id'], interaction.guild), ephemeral=True)
+            await interaction.followup.send(
+                embed=embed,
+                view=FullMessageButtons(msg['id'], interaction.guild),
+                ephemeral=True
+            )
         except Exception as e:
             print(f"❌ Не успя да се изпрати followup за {msg.get('id')}: {e}")
 
@@ -375,13 +390,17 @@ async def help_command(interaction: discord.Interaction, command: Optional[str] 
             "example": "/help create"
         }
     }
-    
+
     if command:
         cmd = command.lower()
         info = commands_info.get(cmd)
         if not info:
-            await interaction.response.send_message(f"⚠️ Не разбирам команда '{command}'.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(f"⚠️ Не разбирам команда '{command}'.", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"⚠️ Не разбирам команда '{command}'.", ephemeral=True)
             return
+
         embed = discord.Embed(title=f"/{cmd} — помощ", color=discord.Color.blue())
         embed.add_field(name="Описание", value=info["description"], inline=False)
         embed.add_field(name="Употреба", value=info["usage"], inline=False)
@@ -391,18 +410,43 @@ async def help_command(interaction: discord.Interaction, command: Optional[str] 
 
     embed = discord.Embed(title="Помощ — Команди", color=discord.Color.blue())
     for name, info in commands_info.items():
-        embed.add_field(name=f"/{name}", value=f"{info['description']}\n`Usage:` {info['usage']}", inline=False)
+        embed.add_field(
+            name=f"/{name}",
+            value=f"{info['description']}\n`Usage:` {info['usage']}",
+            inline=False
+        )
     embed.set_footer(text="За детайли напишете /help <command>.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
-    
+
+
+# === Обработчик за грешки на app commands ===
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CommandNotFound):
+        try:
+            await interaction.response.send_message(
+                "⚠️ Командата не е намерена (възможно е да е била премахната/променена). Опитайте менюто на slash командите.",
+                ephemeral=True
+            )
+        except Exception:
+            pass
+        return
+
+    print(f"Unhandled app command error: {error}")
+    try:
+        await interaction.response.send_message("❌ Възникна грешка при изпълнение на командата.", ephemeral=True)
+    except Exception:
+        pass
+
+
 # === On_ready и пост-старт задачи ===
 @bot.event
 async def on_ready():
     print(f"✅ Влязъл съм като {bot.user} (ботът е онлайн)", flush=True)
 
     async def post_start_tasks():
-        await asyncio.sleep(2)  # кратко изчакване
-  
+        await asyncio.sleep(2)
+
         # --- 1) Зареждане и рестартиране на активните съобщения ---
         try:
             await load_messages()
@@ -410,7 +454,7 @@ async def on_ready():
         except Exception as e:
             print(f"❌ Грешка при load_messages: {e}", flush=True)
 
-         # --- 1) Синхронизация на локалните команди за guild ---
+        # --- 2) Синхронизация на командите ---
         try:
             if guild:
                 await tree.sync(guild=guild)
@@ -421,26 +465,7 @@ async def on_ready():
         except Exception as e:
             print(f"⚠️ Грешка при синхронизация: {e}", flush=True)
 
-        # --- 2) Премахване на старите глобални команди, ако има такива ---
-        try:
-            global_cmds = await tree.fetch_commands()
-            for cmd in global_cmds:
-                if cmd.name in ["help_create"]:  # добави тук други стари имена, ако има
-                    tree.remove_command(cmd.name)
-                    print(f"🧹 Премахната стара глобална команда: /{cmd.name}", flush=True)
-        except Exception as e:
-            print(f"⚠️ Грешка при премахване на глобални команди: {e}", flush=True)
-
-        # --- 3) Обновяване на локалния кеш за мигновено autocomplete ---
-        try:
-            if guild:
-                for name, cmd in tree._guild_commands.get(guild.id, {}).items():
-                    cmd._cache.clear()
-                print("⚡ Локалният кеш на командите е освежен.", flush=True)
-        except Exception as e:
-            print(f"⚠️ Грешка при обновяване на локалния кеш: {e}", flush=True)
-
-        # --- 4) Лог на регистрираните команди ---
+        # --- 3) Лог на регистрираните команди ---
         try:
             cmds = await tree.fetch_commands(guild=guild) if guild else await tree.fetch_commands()
             print("📋 Списък с регистрирани команди:")
@@ -453,15 +478,9 @@ async def on_ready():
 
     asyncio.create_task(post_start_tasks())
 
+
 # === Стартиране на бота ===
 if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
-
-
-
-
-
-
-
