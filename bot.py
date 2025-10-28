@@ -306,7 +306,7 @@ class FullMessageButtons(discord.ui.View):
     interval="Интервал в минути",
     repeat="Брой повторения (0 = безкрайно)",
     id="Уникален идентификатор",
-    channel="Канал за съобщението"
+    channel="Избери канал за изпращане на съобщението"
 )
 async def create(
     interaction: discord.Interaction,
@@ -314,7 +314,7 @@ async def create(
     interval: int,
     repeat: int,
     id: str,
-    channel: Optional[discord.TextChannel] = None
+    channel: Optional[discord.TextChannel] = None  # новият параметър
 ):
     if not has_permission(interaction.user):
         await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
@@ -323,6 +323,7 @@ async def create(
         await interaction.response.send_message(f"⚠️ Съобщение с ID '{id}' вече съществува.", ephemeral=True)
         return
 
+    # Ако няма избран канал, се използва default
     channel_id_for_task = channel.id if channel else (CHANNEL_ID if CHANNEL_ID else None)
     if not channel_id_for_task:
         await interaction.response.send_message(
@@ -345,8 +346,10 @@ async def create(
     active_messages[id] = msg_data
     save_messages()
     await restart_message_task(id, start_immediately=True)
-    await interaction.response.send_message(f"✅ Създадено съобщение '{id}'.", ephemeral=True)
-
+    await interaction.response.send_message(
+        f"✅ Създадено съобщение '{id}' в канал {channel.mention if channel else f'<#{CHANNEL_ID}>'}.",
+        ephemeral=True
+    )
 
 @tree.command(name="list", description="Покажи всички автоматични съобщения.")
 async def list_messages(interaction: discord.Interaction):
@@ -481,4 +484,5 @@ if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
+
 
