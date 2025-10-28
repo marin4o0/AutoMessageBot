@@ -297,6 +297,7 @@ class FullMessageButtons(discord.ui.View):
             await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
             return
         await interaction.response.send_modal(EditModal(self.msg_id, self.guild))
+
 # === Дефиниция на slash командите ===
 @tree.command(name="create", description="Създай ново автоматично съобщение.")
 @app_commands.describe(
@@ -393,7 +394,7 @@ async def help_command(interaction: discord.Interaction, command: Optional[str] 
         embed.add_field(name=f"/{name}", value=f"{info['description']}\n`Usage:` {info['usage']}", inline=False)
     embed.set_footer(text="За детайли напишете /help <command>.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
-
+    
 # === On_ready и пост-старт задачи ===
 @bot.event
 async def on_ready():
@@ -401,6 +402,11 @@ async def on_ready():
 
     async def post_start_tasks():
         await asyncio.sleep(2)  # кратко изчакване
+        
+        if guild:
+    await tree.sync(guild=guild)
+else:
+    await tree.sync()
 
         # --- 1) Зареждане и рестартиране на активните съобщения ---
         try:
@@ -457,5 +463,6 @@ if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
+
 
 
