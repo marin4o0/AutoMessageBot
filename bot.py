@@ -435,9 +435,15 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 async def on_ready():
     print(f"✅ Влязъл съм като {bot.user} (ботът е онлайн)", flush=True)
 
+     # показваме всички командни имена в tree
+    cmds = await tree.fetch_commands(guild=guild) if guild else await tree.fetch_commands()
+    print("Списък с регистрирани команди:")
+    for c in cmds:
+        print(f"- {c.name}")
+        
     async def post_start_tasks():
         print("⏳ post_start_tasks() стартира...", flush=True)
-        await asyncio.sleep(2)  # кратко изчакване, Discord да е готов
+        await asyncio.sleep(5)  # кратко изчакване, Discord да е готов
 
         # --- 1) Зареждане на активните съобщения и рестартиране на задачите ---
         try:
@@ -476,3 +482,4 @@ if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
+
