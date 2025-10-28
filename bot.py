@@ -372,7 +372,7 @@ async def list_messages(interaction: discord.Interaction):
 
 @tree.command(name="help", description="Показва помощ и информация за командите.")
 @app_commands.describe(command="(по избор) име на команда за подробна справка")
-async def help_command(interaction: discord.Interaction, command: Optional[str] = None):
+async def help_slash(interaction: discord.Interaction, command: Optional[str] = None):
     commands_info = {
         "create": {
             "description": "Създава ново автоматично съобщение.",
@@ -395,6 +395,7 @@ async def help_command(interaction: discord.Interaction, command: Optional[str] 
         cmd = command.lower()
         info = commands_info.get(cmd)
         if not info:
+            # безопасно, ако вече има изпратен response
             if interaction.response.is_done():
                 await interaction.followup.send(f"⚠️ Не разбирам команда '{command}'.", ephemeral=True)
             else:
@@ -417,7 +418,6 @@ async def help_command(interaction: discord.Interaction, command: Optional[str] 
         )
     embed.set_footer(text="За детайли напишете /help <command>.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
-
 
 # === Обработчик за грешки на app commands ===
 @tree.error
@@ -484,3 +484,4 @@ if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
+
