@@ -375,6 +375,9 @@ async def help_command(interaction: discord.Interaction, command: Optional[str] 
             "example": "/help create"
         }
     }
+    # тук можеш да имаш print, ако искаш, вътре във функцията
+    # print("DEBUG: /help е декларирана")
+
     print("DEBUG: /help е декларирана")
 for c in tree.walk_commands():
     print(f"- {c.name}")
@@ -461,6 +464,7 @@ if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
+
 
 
 
