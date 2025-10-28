@@ -297,7 +297,7 @@ class FullMessageButtons(discord.ui.View):
             await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
             return
         await interaction.response.send_modal(EditModal(self.msg_id, self.guild))
-# === Регистрация на slash командите ===
+# === Дефиниция на slash командите ===
 @tree.command(name="create", description="Създай ново автоматично съобщение.")
 @app_commands.describe(
     message="Текст на съобщението",
@@ -335,6 +335,7 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
     await restart_message_task(id, start_immediately=True)
     await interaction.response.send_message(f"✅ Създадено съобщение '{id}'.", ephemeral=True)
 
+
 @tree.command(name="list", description="Покажи всички автоматични съобщения.")
 async def list_messages(interaction: discord.Interaction):
     if not has_permission(interaction.user):
@@ -351,6 +352,7 @@ async def list_messages(interaction: discord.Interaction):
             await interaction.followup.send(embed=embed, view=FullMessageButtons(msg['id'], interaction.guild), ephemeral=True)
         except Exception as e:
             print(f"❌ Не успя да се изпрати followup за {msg.get('id')}: {e}")
+
 
 @tree.command(name="help", description="Показва помощ и информация за командите.")
 @app_commands.describe(command="(по избор) име на команда за подробна справка")
@@ -392,7 +394,17 @@ async def help_command(interaction: discord.Interaction, command: Optional[str] 
     embed.set_footer(text="За детайли напишете /help <command>.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# === On ready и пост-старт задачи ===
+
+# === Синхронизация веднага след дефиниция на командите ===
+if guild:
+    asyncio.run(tree.sync(guild=guild))
+    print(f"🔁 Slash командите са синхронизирани локално за guild {GUILD_ID}")
+else:
+    asyncio.run(tree.sync())
+    print("🌍 Slash командите са синхронизирани глобално")
+
+
+# === On_ready и пост-старт задачи ===
 @bot.event
 async def on_ready():
     print(f"✅ Влязъл съм като {bot.user} (ботът е онлайн)", flush=True)
@@ -407,17 +419,6 @@ async def on_ready():
         except Exception as e:
             print(f"❌ Грешка при load_messages: {e}", flush=True)
 
-        # Синхронизация на командите локално
-        try:
-            if guild:
-                await tree.sync(guild=guild)
-                print(f"🔁 Slash командите са синхронизирани локално за guild {GUILD_ID}", flush=True)
-            else:
-                await tree.sync()
-                print("🌍 Slash командите са синхронизирани глобално.", flush=True)
-        except Exception as e:
-            print(f"⚠️ Грешка при синхронизация на командите: {e}", flush=True)
-
         # Лог на всички регистрирани команди
         try:
             cmds = await tree.fetch_commands(guild=guild) if guild else await tree.fetch_commands()
@@ -428,6 +429,7 @@ async def on_ready():
             print(f"⚠️ Грешка при fetch на командите: {e}")
 
     asyncio.create_task(post_start_tasks())
+
 
 # === Стартиране на бота ===
 if not TOKEN:
