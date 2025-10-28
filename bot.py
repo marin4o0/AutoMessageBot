@@ -439,30 +439,36 @@ async def on_ready():
         print("⏳ post_start_tasks() стартира...", flush=True)
         await asyncio.sleep(2)  # кратко изчакване, Discord да е готов
 
-        # --- Премахване на всички стари команди (глобални и локални) ---
+        # --- 1) Зареждане на активните съобщения и рестартиране на задачите ---
         try:
-            # Вземаме всички команди (глобални)
+            await load_messages()
+            print("💬 Заредени са активните съобщения и задачите са рестартирани.", flush=True)
+        except Exception as e:
+            print(f"❌ Грешка при load_messages: {e}", flush=True)
+
+        # --- 2) Премахване на всички стари глобални команди ---
+        try:
             global_cmds = await tree.fetch_commands()
             for cmd in global_cmds:
                 try:
-                    await tree.remove_command(cmd.name)
+                    tree.remove_command(cmd.name)  # без await
                     print(f"🧹 Премахната глобална команда: /{cmd.name}", flush=True)
                 except Exception as e:
                     print(f"⚠️ Неуспешно премахване на глобална команда /{cmd.name}: {e}", flush=True)
 
-            # Вземаме всички команди за guild (локални)
+            # --- Премахване на всички стари локални команди за guild ---
             if guild:
                 guild_cmds = await tree.fetch_commands(guild=guild)
                 for cmd in guild_cmds:
                     try:
-                        await tree.remove_command(cmd.name, guild=guild)
+                        tree.remove_command(cmd.name, guild=guild)  # без await
                         print(f"🧹 Премахната локална команда: /{cmd.name}", flush=True)
                     except Exception as e:
                         print(f"⚠️ Неуспешно премахване на локална команда /{cmd.name}: {e}", flush=True)
 
             print("✅ Всички стари команди са премахнати.", flush=True)
 
-            # --- Синхронизация на командите локално за guild ---
+            # --- 3) Синхронизация на командите локално за guild ---
             if guild:
                 await tree.sync(guild=guild)
                 print(f"🔁 Slash командите са синхронизирани локално за guild {GUILD_ID}", flush=True)
