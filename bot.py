@@ -465,6 +465,8 @@ async def on_ready():
             print(f"⚠️ Грешка при изчистване/синхронизиране на команди: {e}", flush=True)
 
         print("✅ post_start_tasks() приключи.", flush=True)
+bot.run(TOKEN)
 
     # Стартираме задачата без да блокираме on_ready()
     asyncio.create_task(post_start_tasks())
+
