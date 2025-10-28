@@ -435,12 +435,20 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 # === Стартиране на бота ===
 @bot.event
 async def on_ready():
-    print(f"✅ Влязъл съм като {bot.user} (ботът е онлайн)", flush=True)
+    print(f"✅ on_ready() стартира за {bot.user}", flush=True)
 
     async def post_start_tasks():
-        await asyncio.sleep(5)  # изчакваме Discord да е напълно готов
+        print("⏳ post_start_tasks() стартира...", flush=True)
+        await asyncio.sleep(5)  # изчакваме Discord да е готов
 
-        # === Изчистване на стари команди ===
+        # Зареждане на активните съобщения
+        try:
+            await load_messages()
+            print("💬 Заредени са активните съобщения и задачите са рестартирани.", flush=True)
+        except Exception as e:
+            print(f"❌ Грешка при load_messages: {e}", flush=True)
+
+        # Изчистване на стари команди (по желание, включи след като работи load_messages)
         try:
             existing = await tree.fetch_commands(guild=guild) if guild else await tree.fetch_commands()
             for cmd in existing:
@@ -451,18 +459,12 @@ async def on_ready():
                     except Exception as inner:
                         print(f"⚠️ Неуспешно премахване на {cmd.name}: {inner}", flush=True)
 
-            # Синхронизиране на командите
             await tree.sync(guild=guild) if guild else await tree.sync()
             print(f"🔁 Slash командите са синхронизирани.", flush=True)
         except Exception as e:
             print(f"⚠️ Грешка при изчистване/синхронизиране на команди: {e}", flush=True)
 
-        # === Зареждане на активните съобщения ===
-        try:
-            await load_messages()
-            print("💬 Заредени са активните съобщения и задачите са рестартирани.", flush=True)
-        except Exception as e:
-            print(f"❌ Грешка при load_messages: {e}", flush=True)
+        print("✅ post_start_tasks() приключи.", flush=True)
 
-    # Стартираме пост-инициализационните задачи без да блокираме on_ready()
+    # Стартираме задачата без да блокираме on_ready()
     asyncio.create_task(post_start_tasks())
