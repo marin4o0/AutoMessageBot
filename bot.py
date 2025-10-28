@@ -7,6 +7,10 @@ import json
 from typing import Optional
 from datetime import datetime
 
+import logging, sys
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+print("🚀 Стартирам Discord клиента...", flush=True)
+
 # === КОНФИГУРАЦИЯ ===
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID")) if os.getenv("DISCORD_CHANNEL_ID") else None
@@ -472,3 +476,4 @@ async def on_ready():
 
     # Стартираме пост-инициализационните задачи без да блокираме on_ready()
     bot.loop.create_task(post_start_tasks())
+
