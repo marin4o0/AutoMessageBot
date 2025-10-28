@@ -431,56 +431,44 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 # === Стартиране на бота ===
 @bot.event
 async def on_ready():
-    print("⚙️ Стартиране на on_ready()...")
+    print(f"✅ Влязъл съм като {bot.user} (ботът е онлайн)", flush=True)
 
-    try:
-        print("🔗 Свързване и синхронизиране на slash команди...")
-        if guild:
-            await tree.sync(guild=guild)
-            print(f"🔁 Slash командите са синхронизирани с guild {guild.id}")
-        else:
-            await tree.sync()
-            print("🌍 Slash командите са синхронизирани глобално.")
-    except Exception as e:
-        print(f"❌ Грешка при tree.sync(): {e}")
+    async def post_start_tasks():
+        await asyncio.sleep(5)  # изчакваме Discord да е напълно готов
 
-    # 🧹 Изчистване на стари /help_create и други
-    try:
-        print("🧹 Проверявам за стари slash команди...")
-        if guild:
-            existing = await tree.fetch_commands(guild=guild)
-        else:
-            existing = await tree.fetch_commands()
+        # === Изчистване на стари команди ===
+        try:
+            if guild:
+                existing = await tree.fetch_commands(guild=guild)
+            else:
+                existing = await tree.fetch_commands()
 
-        for cmd in existing:
-            if cmd.name not in ["create", "list", "help"]:
-                print(f"🗑️ Премахвам стара команда: /{cmd.name}")
-                try:
-                    if guild:
-                        await tree.remove_command(cmd.name, guild=guild)
-                    else:
-                        await tree.remove_command(cmd.name)
-                except Exception as inner:
-                    print(f"⚠️ Неуспяно премахване на {cmd.name}: {inner}")
+            for cmd in existing:
+                if cmd.name not in ["create", "list", "help"]:
+                    print(f"🧹 Премахвам стара команда: /{cmd.name}", flush=True)
+                    try:
+                        if guild:
+                            await tree.remove_command(cmd.name, guild=guild)
+                        else:
+                            await tree.remove_command(cmd.name)
+                    except Exception as inner:
+                        print(f"⚠️ Неуспешно премахване на {cmd.name}: {inner}", flush=True)
 
-        if guild:
-            await tree.sync(guild=guild)
-        else:
-            await tree.sync()
-        print("✅ Изчистването на стари команди приключи успешно.")
+            if guild:
+                await tree.sync(guild=guild)
+                print(f"🔁 Slash командите са синхронизирани с guild {guild.id}", flush=True)
+            else:
+                await tree.sync()
+                print("🌍 Slash командите са синхронизирани глобално.", flush=True)
+        except Exception as e:
+            print(f"⚠️ Грешка при изчистване/синхронизиране на команди: {e}", flush=True)
 
-    except Exception as e:
-        print(f"⚠️ Грешка при изчистване на стари slash команди: {e}")
+        # === Зареждане на съобщения ===
+        try:
+            await load_messages()
+            print("💬 Заредени са активните съобщения и задачите са рестартирани.", flush=True)
+        except Exception as e:
+            print(f"❌ Грешка при load_messages: {e}", flush=True)
 
-    # 💤 Малко изчакване преди зареждане на съобщения
-    await asyncio.sleep(3)
-
-    try:
-        print("💬 Зареждане на активни съобщения...")
-        await load_messages()
-        print("✅ Активните съобщения са заредени и задачите са рестартирани.")
-    except Exception as e:
-        print(f"❌ Грешка при load_messages: {e}")
-
-    print(f"✅ Влязъл съм като {bot.user}")
-
+    # Стартираме пост-инициализационните задачи без да блокираме on_ready()
+    bot.loop.create_task(post_start_tasks())
