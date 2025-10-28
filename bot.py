@@ -430,24 +430,36 @@ async def on_ready():
     print(f"✅ Влязъл съм като {bot.user}")
     try:
         if guild:
-            # Ако е даден GUILD_ID — синхронизиране само за него (по-бързо и безопасно при разработка)
             await tree.sync(guild=guild)
             print(f"🔁 Slash командите са синхронизирани с guild {guild.id}")
         else:
             await tree.sync()
             print("🌍 Slash командите са синхронизирани глобално.")
     except Exception as e:
-        # Ако синхронизиране се провали — покажи грешка, но продължи
         print(f"❌ Грешка при синхронизиране на slash командите: {e}")
 
-    # Зареждаме запазените задачи
     try:
         await load_messages()
     except Exception as e:
         print(f"❌ Грешка при load_messages: {e}")
 
-
-if not TOKEN:
-    print("❌ Не е зададен DISCORD_TOKEN.")
-else:
-    bot.run(TOKEN)
+    # 👉 Изчистване на стари /help_create и други невалидни slash команди
+    try:
+        if guild:
+            existing = await tree.fetch_commands(guild=guild)
+            for cmd in existing:
+                if cmd.name not in ["create", "list", "help"]:
+                    print(f"🧹 Премахвам стара команда: /{cmd.name}")
+                    await tree.remove_command(cmd.name, guild=guild)
+            await tree.sync(guild=guild)
+            print("✅ Изчистени са стари команди, новите са синхронизирани.")
+        else:
+            existing = await tree.fetch_commands()
+            for cmd in existing:
+                if cmd.name not in ["create", "list", "help"]:
+                    print(f"🧹 Премахвам стара глобална команда: /{cmd.name}")
+                    await tree.remove_command(cmd.name)
+            await tree.sync()
+            print("✅ Изчистени са стари глобални команди.")
+    except Exception as e:
+        print(f"⚠️ Грешка при изчистване на стари slash команди: {e}")
