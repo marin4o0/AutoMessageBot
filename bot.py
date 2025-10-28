@@ -442,32 +442,22 @@ async def on_ready():
 
         # === Изчистване на стари команди ===
         try:
-            if guild:
-                existing = await tree.fetch_commands(guild=guild)
-            else:
-                existing = await tree.fetch_commands()
-
+            existing = await tree.fetch_commands(guild=guild) if guild else await tree.fetch_commands()
             for cmd in existing:
                 if cmd.name not in ["create", "list", "help"]:
                     print(f"🧹 Премахвам стара команда: /{cmd.name}", flush=True)
                     try:
-                        if guild:
-                            await tree.remove_command(cmd.name, guild=guild)
-                        else:
-                            await tree.remove_command(cmd.name)
+                        await tree.remove_command(cmd.name, guild=guild) if guild else await tree.remove_command(cmd.name)
                     except Exception as inner:
                         print(f"⚠️ Неуспешно премахване на {cmd.name}: {inner}", flush=True)
 
-            if guild:
-                await tree.sync(guild=guild)
-                print(f"🔁 Slash командите са синхронизирани с guild {guild.id}", flush=True)
-            else:
-                await tree.sync()
-                print("🌍 Slash командите са синхронизирани глобално.", flush=True)
+            # Синхронизиране на командите
+            await tree.sync(guild=guild) if guild else await tree.sync()
+            print(f"🔁 Slash командите са синхронизирани.", flush=True)
         except Exception as e:
             print(f"⚠️ Грешка при изчистване/синхронизиране на команди: {e}", flush=True)
 
-        # === Зареждане на съобщения ===
+        # === Зареждане на активните съобщения ===
         try:
             await load_messages()
             print("💬 Заредени са активните съобщения и задачите са рестартирани.", flush=True)
@@ -475,5 +465,4 @@ async def on_ready():
             print(f"❌ Грешка при load_messages: {e}", flush=True)
 
     # Стартираме пост-инициализационните задачи без да блокираме on_ready()
-    bot.loop.create_task(post_start_tasks())
-
+    asyncio.create_task(post_start_tasks())
