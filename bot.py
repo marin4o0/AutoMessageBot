@@ -297,7 +297,7 @@ class FullMessageButtons(discord.ui.View):
             await interaction.response.send_message("🚫 Нямаш права.", ephemeral=True)
             return
         await interaction.response.send_modal(EditModal(self.msg_id, self.guild))
-# === Commands ===
+# === Регистрация на slash командите ===
 @tree.command(name="create", description="Създай ново автоматично съобщение.")
 @app_commands.describe(
     message="Текст на съобщението",
@@ -316,7 +316,7 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
 
     channel_id_for_task = channel.id if channel else (CHANNEL_ID if CHANNEL_ID else None)
     if not channel_id_for_task:
-        await interaction.response.send_message("❌ Не е зададен канал. Можете да подадете канал като параметър или да зададете CHANNEL_ID в env.", ephemeral=True)
+        await interaction.response.send_message("❌ Не е зададен канал.", ephemeral=True)
         return
 
     msg_data = {
@@ -335,7 +335,6 @@ async def create(interaction: discord.Interaction, message: str, interval: int, 
     await restart_message_task(id, start_immediately=True)
     await interaction.response.send_message(f"✅ Създадено съобщение '{id}'.", ephemeral=True)
 
-
 @tree.command(name="list", description="Покажи всички автоматични съобщения.")
 async def list_messages(interaction: discord.Interaction):
     if not has_permission(interaction.user):
@@ -345,23 +344,17 @@ async def list_messages(interaction: discord.Interaction):
         await interaction.response.send_message("ℹ️ Няма съобщения.", ephemeral=True)
         return
 
-    # Пращаме първо едно кратко епhemeral съобщение, след това followup-ите с embed-ите
     await interaction.response.send_message("📋 Всички автоматични съобщения:", ephemeral=True)
     for msg in active_messages.values():
         embed = build_info_embed(msg)
-        # followup.send - използваме try/except в случай че followup не може да бъде изпълнен
         try:
             await interaction.followup.send(embed=embed, view=FullMessageButtons(msg['id'], interaction.guild), ephemeral=True)
         except Exception as e:
             print(f"❌ Не успя да се изпрати followup за {msg.get('id')}: {e}")
 
-
-# === HELP команда (пълна документация и как да копирате Channel ID) ===
 @tree.command(name="help", description="Показва помощ и информация за командите.")
 @app_commands.describe(command="(по избор) име на команда за подробна справка")
 async def help_command(interaction: discord.Interaction, command: Optional[str] = None):
-    # Няма нужда от права — позволяваме на всички да видят помощта
-    # Ако е подадено конкретно име, показваме детайли, иначе общ преглед
     commands_info = {
         "create": {
             "description": "Създава ново автоматично съобщение.",
@@ -384,75 +377,37 @@ async def help_command(interaction: discord.Interaction, command: Optional[str] 
         cmd = command.lower()
         info = commands_info.get(cmd)
         if not info:
-            await interaction.response.send_message(f"⚠️ Не разбирам команда '{command}'. Вижте /help за налични команди.", ephemeral=True)
+            await interaction.response.send_message(f"⚠️ Не разбирам команда '{command}'.", ephemeral=True)
             return
         embed = discord.Embed(title=f"/{cmd} — помощ", color=discord.Color.blue())
         embed.add_field(name="Описание", value=info["description"], inline=False)
         embed.add_field(name="Употреба", value=info["usage"], inline=False)
         embed.add_field(name="Пример", value=info["example"], inline=False)
-        # Добавяме кратък блок с как да копирате Channel ID
-        embed.add_field(
-            name="Как да копирате Channel ID (Discord)",
-            value=(
-                "1) Отидете в Settings > Advanced и включете **Developer Mode**.\n"
-                "2) Отидете на желания канал, натиснете десен бутон върху името му.\n"
-                "3) Изберете **Copy ID** — това е числото, което можете да подадете като `channel`.\n\n"
-                "Можете да подадете канал като mention (напр. #announcements) или директно като ID (напр. 123456789012345678)."
-            ),
-            inline=False
-        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
-    # Общ преглед
     embed = discord.Embed(title="Помощ — Команди", color=discord.Color.blue())
     for name, info in commands_info.items():
         embed.add_field(name=f"/{name}", value=f"{info['description']}\n`Usage:` {info['usage']}", inline=False)
-    embed.set_footer(text="За детайли напишете /help <command>. За копиране на Channel ID — вижте детайлите при конкретна команда.")
+    embed.set_footer(text="За детайли напишете /help <command>.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
-# === Обработчик за грешки на app commands (предотвратява големи tracebacks като CommandNotFound) ===
-@tree.error
-async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    # CommandNotFound се появява когато interaction съдържа команда, която вече не е регистрирана (cache / старо)
-    if isinstance(error, app_commands.CommandNotFound):
-        # кратко уведомление — не печатаме голям traceback
-        try:
-            await interaction.response.send_message("⚠️ Командата не е намерена (възможно е да е била премахната/променена). Опитайте да отворите менюто на slash командите отново.", ephemeral=True)
-        except Exception:
-            pass
-        return
-
-    # За останалите app command грешки — логваме и връщаме общо съобщение
-    print(f"Unhandled app command error: {error}")
-    try:
-        await interaction.response.send_message("❌ Възникна грешка при изпълнение на командата.", ephemeral=True)
-    except Exception:
-        pass
-
+# === On ready и пост-старт задачи ===
 @bot.event
 async def on_ready():
     print(f"✅ Влязъл съм като {bot.user} (ботът е онлайн)", flush=True)
 
-     # показваме всички командни имена в tree
-    cmds = await tree.fetch_commands(guild=guild) if guild else await tree.fetch_commands()
-    print("Списък с регистрирани команди:")
-    for c in cmds:
-        print(f"- {c.name}")
-        
     async def post_start_tasks():
-        print("⏳ post_start_tasks() стартира...", flush=True)
-        await asyncio.sleep(5)  # кратко изчакване, Discord да е готов
+        await asyncio.sleep(2)  # кратко изчакване
 
-        # --- 1) Зареждане на активните съобщения и рестартиране на задачите ---
+        # Зареждане и рестартиране на активните съобщения
         try:
             await load_messages()
             print("💬 Заредени са активните съобщения и задачите са рестартирани.", flush=True)
         except Exception as e:
             print(f"❌ Грешка при load_messages: {e}", flush=True)
 
-        # --- 2) Синхронизация на командите локално за guild ---
+        # Синхронизация на командите локално
         try:
             if guild:
                 await tree.sync(guild=guild)
@@ -463,23 +418,19 @@ async def on_ready():
         except Exception as e:
             print(f"⚠️ Грешка при синхронизация на командите: {e}", flush=True)
 
-        # --- 3) Принудително обновяване на локалния кеш (за бързо появяване в autocomplete) ---
-        if guild:
-            try:
-                for name, cmd in tree._guild_commands.get(guild.id, {}).items():
-                    cmd._cache.clear()  # изчиства вътрешния кеш на командата
-                print("⚡ Локалният кеш на командите е освежен.", flush=True)
-            except Exception as e:
-                print(f"⚠️ Грешка при обновяване на локалния кеш: {e}", flush=True)
+        # Лог на всички регистрирани команди
+        try:
+            cmds = await tree.fetch_commands(guild=guild) if guild else await tree.fetch_commands()
+            print("📋 Списък с регистрирани команди:")
+            for c in cmds:
+                print(f"- {c.name}")
+        except Exception as e:
+            print(f"⚠️ Грешка при fetch на командите: {e}")
 
-        print("✅ post_start_tasks() приключи.", flush=True)
-
-    # Стартираме пост-старт задачите
     asyncio.create_task(post_start_tasks())
 
-# === Стартиране на бота в края на файла ===
+# === Стартиране на бота ===
 if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
-
