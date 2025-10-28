@@ -446,38 +446,25 @@ async def on_ready():
         except Exception as e:
             print(f"❌ Грешка при load_messages: {e}", flush=True)
 
-        # --- 2) Премахване на всички стари глобални команди ---
+        # --- 2) Синхронизация на командите локално за guild ---
         try:
-            global_cmds = await tree.fetch_commands()
-            for cmd in global_cmds:
-                try:
-                    tree.remove_command(cmd.name)  # без await
-                    print(f"🧹 Премахната глобална команда: /{cmd.name}", flush=True)
-                except Exception as e:
-                    print(f"⚠️ Неуспешно премахване на глобална команда /{cmd.name}: {e}", flush=True)
-
-            # --- Премахване на всички стари локални команди за guild ---
-            if guild:
-                guild_cmds = await tree.fetch_commands(guild=guild)
-                for cmd in guild_cmds:
-                    try:
-                        tree.remove_command(cmd.name, guild=guild)  # без await
-                        print(f"🧹 Премахната локална команда: /{cmd.name}", flush=True)
-                    except Exception as e:
-                        print(f"⚠️ Неуспешно премахване на локална команда /{cmd.name}: {e}", flush=True)
-
-            print("✅ Всички стари команди са премахнати.", flush=True)
-
-            # --- 3) Синхронизация на командите локално за guild ---
             if guild:
                 await tree.sync(guild=guild)
                 print(f"🔁 Slash командите са синхронизирани локално за guild {GUILD_ID}", flush=True)
             else:
                 await tree.sync()
                 print("🌍 Slash командите са синхронизирани глобално.", flush=True)
-
         except Exception as e:
-            print(f"⚠️ Грешка при премахване/синхронизация на командите: {e}", flush=True)
+            print(f"⚠️ Грешка при синхронизация на командите: {e}", flush=True)
+
+        # --- 3) Принудително обновяване на локалния кеш (за бързо появяване в autocomplete) ---
+        if guild:
+            try:
+                for name, cmd in tree._guild_commands.get(guild.id, {}).items():
+                    cmd._cache.clear()  # изчиства вътрешния кеш на командата
+                print("⚡ Локалният кеш на командите е освежен.", flush=True)
+            except Exception as e:
+                print(f"⚠️ Грешка при обновяване на локалния кеш: {e}", flush=True)
 
         print("✅ post_start_tasks() приключи.", flush=True)
 
