@@ -369,10 +369,10 @@ async def list_messages(interaction: discord.Interaction):
         except Exception as e:
             print(f"❌ Не успя да се изпрати followup за {msg.get('id')}: {e}")
 
-
-@tree.command(name="help", description="Показва помощ и информация за командите.")
+# Регистрация на помощна команда като /help_create
+@tree.command(name="help_create", description="Помощ за командите (замества /help)")
 @app_commands.describe(command="(по избор) име на команда за подробна справка")
-async def help_slash(interaction: discord.Interaction, command: Optional[str] = None):
+async def help_create(interaction: discord.Interaction, command: Optional[str] = None):
     commands_info = {
         "create": {
             "description": "Създава ново автоматично съобщение.",
@@ -384,10 +384,10 @@ async def help_slash(interaction: discord.Interaction, command: Optional[str] = 
             "usage": "/list",
             "example": "/list"
         },
-        "help": {
-            "description": "Показва справка за командите.",
-            "usage": "/help [command]",
-            "example": "/help create"
+        "help_create": {
+            "description": "Показва справка за командите (текуща работеща версия).",
+            "usage": "/help_create [command]",
+            "example": "/help_create create"
         }
     }
 
@@ -395,7 +395,6 @@ async def help_slash(interaction: discord.Interaction, command: Optional[str] = 
         cmd = command.lower()
         info = commands_info.get(cmd)
         if not info:
-            # безопасно, ако вече има изпратен response
             if interaction.response.is_done():
                 await interaction.followup.send(f"⚠️ Не разбирам команда '{command}'.", ephemeral=True)
             else:
@@ -416,7 +415,7 @@ async def help_slash(interaction: discord.Interaction, command: Optional[str] = 
             value=f"{info['description']}\n`Usage:` {info['usage']}",
             inline=False
         )
-    embed.set_footer(text="За детайли напишете /help <command>.")
+    embed.set_footer(text="За детайли напишете /help_create <command>.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # === Обработчик за грешки на app commands ===
@@ -482,3 +481,4 @@ if not TOKEN:
     print("❌ Не е зададен DISCORD_TOKEN.")
 else:
     bot.run(TOKEN)
+
